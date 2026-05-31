@@ -1,0 +1,11 @@
+symbol,pe_ratio,market_cap_cr,sector,industry,dividend_yield,market_cap_tier,currency,exchange,long_name
+RELIANCE.NS,22.123241,1787910.16,Energy,Oil & Gas Refining & Marketing,0.45,large,INR,NSI,Reliance Industries Limited
+TCS.NS,16.610779,817289.76,Technology,Information Technology Services,5.49,large,INR,NSI,Tata Consultancy Services Limited
+INFY.NS,15.014227,469898.57,Technology,Information Technology Services,4.31,large,INR,NSI,Infosys Limited
+HDFCBANK.NS,16.612003,1146423.97,Financial Services,Banks - Regional,1.75,large,INR,NSI,HDFC Bank Limited
+ICICIBANK.NS,16.805779,900754.26,Financial Services,Banks - Regional,0.88,large,INR,NSI,ICICI Bank Limited
+ADANIENT.NS,39.839954,402701.16,Energy,Thermal Coal,0.04,large,INR,NSI,Adani Enterprises Limited
+BAJFINANCE.NS,29.759174,564738.65,Financial Services,Credit Services,0.59,large,INR,NSI,Bajaj Finance Limited
+BHARTIARTL.NS,41.156616,1114130.25,Communication Services,Telecom Services,0.87,large,INR,NSI,Bharti Airtel Limited
+SBIN.NS,10.581523,890200.76,Financial Services,Banks - Regional,1.8,large,INR,NSI,State Bank of India
+LT.NS,34.84188,560791.13,Industrials,Engineering & Construction,0.93,large,INR,NSI,Larsen & Toubro Limited
