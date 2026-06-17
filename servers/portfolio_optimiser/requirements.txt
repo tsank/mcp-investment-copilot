@@ -1,0 +1,31 @@
+# servers/portfolio_optimiser/requirements.txt
+# Complete and self-contained — no shared base file (Option A)
+#
+# Install:
+#   cd servers/portfolio_optimiser
+#   python -m pip install -r requirements.txt
+#
+# V1 solver: scipy SLSQP (convex QP)
+# V2 solver: scipy differential_evolution (non-smooth constraints)
+# V3 solver: pymoo NSGA-II (true multi-objective Pareto)
+#   pymoo is commented out — uncomment for V3
+#   # pymoo==0.6.1
+
+# MCP server SDK
+mcp==1.3.0
+
+# Data handling
+numpy==1.26.4
+pandas==2.2.2
+
+# Optimisation — scipy SLSQP for V1 convex QP
+# differential_evolution also in scipy — no additional package for V2
+scipy==1.13.0
+
+# Configuration and validation
+python-dotenv==1.0.1
+pydantic==2.7.4
+
+# Testing
+pytest==8.2.0
+pytest-asyncio==0.23.7
