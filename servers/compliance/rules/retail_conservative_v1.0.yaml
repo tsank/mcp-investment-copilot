@@ -1,0 +1,78 @@
+# servers/compliance/rules/retail_conservative_v1.0.yaml
+#
+# Compliance ruleset for retail conservative investor profile.
+# Designed for individual investors with moderate risk tolerance
+# investing in NSE large-cap equities.
+#
+# Version history:
+#   v1.0 — initial ruleset
+#
+# Rule severity:
+#   hard: blocking violation — recommendation must not proceed
+#   soft: warning — recommendation may proceed with explicit caveats
+#
+# Gating metric: CVaR (Expected Shortfall), not VaR.
+# CVaR is the mean loss in the worst (1-α) scenarios — more conservative
+# than VaR which only identifies the threshold, not the tail magnitude.
+
+profile: retail_conservative
+version: "v1.0"
+
+rules:
+
+  # ── Concentration limits ─────────────────────────────────────────────────
+
+  - id:          SINGLE_ASSET_CAP
+    description: "No single asset may exceed 30% of portfolio weight"
+    limit:        0.30
+    severity:     hard
+    applies_to:   weight
+    note: >
+      Prevents overconcentration in any single stock.
+      A 30% cap allows meaningful positions while limiting idiosyncratic risk.
+
+  - id:          SECTOR_CAP
+    description: "No single sector may exceed 40% of portfolio weight"
+    limit:        0.40
+    severity:     hard
+    applies_to:   sector_weight
+    note: >
+      Financial Services contains 4 of our 10 symbols.
+      40% cap prevents the portfolio from being dominated by one sector.
+      Sector weights are derived from fundamentals.sector field.
+
+  # ── Risk threshold ───────────────────────────────────────────────────────
+
+  - id:          CVAR_THRESHOLD
+    description: "Portfolio CVaR at 95% confidence must not exceed 25% annual loss"
+    limit:        0.25
+    severity:     hard
+    applies_to:   cvar_95
+    note: >
+      CVaR_95 = expected loss in the worst 5% of simulated annual scenarios.
+      0.25 = 25% loss threshold — appropriate for retail conservative profile.
+      Gated on CVaR (not VaR) — CVaR captures tail magnitude, VaR only threshold.
+
+  # ── Diversification ──────────────────────────────────────────────────────
+
+  - id:          MIN_ASSETS
+    description: "Portfolio must hold at least 3 assets with non-zero weight"
+    limit:        3
+    severity:     soft
+    applies_to:   active_asset_count
+    note: >
+      Markowitz optimisation may concentrate in 1-2 assets when constraints
+      are loose. This soft rule encourages minimum diversification.
+      Soft severity — recommendation proceeds with warning if violated.
+
+  # ── Minimum position size ────────────────────────────────────────────────
+
+  - id:          MIN_POSITION_SIZE
+    description: "No asset with non-zero weight may be below 2% of portfolio"
+    limit:        0.02
+    severity:     soft
+    applies_to:   min_nonzero_weight
+    note: >
+      Prevents token positions that add negligible diversification benefit
+      but create unnecessary rebalancing cost.
+      Soft severity — informational warning only.

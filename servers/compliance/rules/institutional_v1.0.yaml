@@ -1,0 +1,72 @@
+# servers/compliance/rules/institutional_v1.0.yaml
+#
+# Compliance ruleset for institutional investor profile.
+# Designed for institutional portfolios with higher risk tolerance
+# and larger position sizes acceptable under SEBI regulations.
+#
+# Version history:
+#   v1.0 — initial ruleset
+#
+# Key differences from retail_conservative:
+#   - Higher single asset cap (40% vs 30%)
+#   - Higher sector cap (50% vs 40%)
+#   - Higher CVaR threshold (35% vs 25%)
+#   - Minimum assets reduced to 2 (institutional may run concentrated books)
+
+profile: institutional
+version: "v1.0"
+
+rules:
+
+  # ── Concentration limits ─────────────────────────────────────────────────
+
+  - id:          SINGLE_ASSET_CAP
+    description: "No single asset may exceed 40% of portfolio weight"
+    limit:        0.40
+    severity:     hard
+    applies_to:   weight
+    note: >
+      Institutional portfolios may carry larger single-stock positions.
+      40% cap still prevents extreme concentration.
+
+  - id:          SECTOR_CAP
+    description: "No single sector may exceed 50% of portfolio weight"
+    limit:        0.50
+    severity:     hard
+    applies_to:   sector_weight
+    note: >
+      Institutional mandates may have sector specialisation.
+      50% cap allows meaningful sector tilts while maintaining diversification.
+
+  # ── Risk threshold ───────────────────────────────────────────────────────
+
+  - id:          CVAR_THRESHOLD
+    description: "Portfolio CVaR at 95% confidence must not exceed 35% annual loss"
+    limit:        0.35
+    severity:     hard
+    applies_to:   cvar_95
+    note: >
+      Institutional investors have higher loss tolerance than retail.
+      35% CVaR threshold appropriate for institutional equity mandates.
+
+  # ── Diversification ──────────────────────────────────────────────────────
+
+  - id:          MIN_ASSETS
+    description: "Portfolio must hold at least 2 assets with non-zero weight"
+    limit:        2
+    severity:     soft
+    applies_to:   active_asset_count
+    note: >
+      Institutional mandates may run concentrated 2-3 stock books.
+      Minimum 2 assets prevents single-stock portfolios.
+
+  # ── Minimum position size ────────────────────────────────────────────────
+
+  - id:          MIN_POSITION_SIZE
+    description: "No asset with non-zero weight may be below 1% of portfolio"
+    limit:        0.01
+    severity:     soft
+    applies_to:   min_nonzero_weight
+    note: >
+      Lower minimum than retail — institutional portfolios may carry
+      small strategic positions for various reasons.
