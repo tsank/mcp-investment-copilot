@@ -281,23 +281,48 @@ class SimulationResult(BaseModel):
     Combined output of both simulation tools in the Scenario Simulation Server.
     Populated by: simulate node.
     Consumed by: check_compliance node (cvar_95 from best available result).
-                 synthesise node (full result).
+                 synthesise node (full result including comparison).
 
-    monte_carlo: static distribution Monte Carlo (IID draws)
-        "The future will look statistically like the past on average."
+    Four simulation outputs — current vs optimal weights, static vs dynamic:
 
-    garch_sim: GARCH-conditional Monte Carlo (serially dependent draws)
-        "The future will evolve from where volatility is right now."
-        Uses fitted GARCH params from GARCHResult via AgentState.
-        Only populated if compute_garch_forecast was called upstream.
+    monte_carlo:         Static distribution Monte Carlo, CURRENT portfolio weights
+                         "What is the tail risk of what I actually hold?"
+                         Uses Portfolio.holdings from AgentState input.
+
+    monte_carlo_optimal: Static distribution Monte Carlo, OPTIMAL portfolio weights
+                         "What is the tail risk of the Markowitz-optimal portfolio?"
+                         Uses optimisation_result.optimal_weights from AgentState.
+                         None if Portfolio Optimiser did not run (RISK analysis type).
+
+    garch_sim:           GARCH-conditional Monte Carlo, CURRENT portfolio weights
+                         "What is the tail risk of what I hold, conditioned on
+                          current volatility regime?"
+                         Uses Portfolio.holdings and garch_result from AgentState.
+
+    garch_sim_optimal:   GARCH-conditional Monte Carlo, OPTIMAL portfolio weights
+                         "What is the tail risk of the optimal portfolio, conditioned
+                          on current volatility regime?"
+                         Uses optimisation_result.optimal_weights and garch_result.
+                         None if Portfolio Optimiser did not run.
+
+    The comparison between monte_carlo and monte_carlo_optimal (or garch_sim vs
+    garch_sim_optimal) answers the key investment question:
+        "How much tail risk reduction does rebalancing achieve?"
 
     regime_warning: True if CVaR(garch_sim) diverges materially from
-        CVaR(monte_carlo) — signals current volatility regime is elevated
-        relative to historical average. Surfaced in final recommendation.
+        CVaR(monte_carlo) for the same weights — signals current volatility
+        regime is elevated relative to historical average.
+        Surfaced explicitly in the final recommendation.
+
+    Compliance server gates on CVaR from garch_sim if available,
+    otherwise monte_carlo — always uses current weights, not optimal.
+    Compliance checks the user's ACTUAL position, not a hypothetical.
     """
-    monte_carlo:    Optional[SimulationOutput] = None
-    garch_sim:      Optional[SimulationOutput] = None
-    regime_warning: bool = False                # True if |cvar_garch - cvar_mc| > threshold
+    monte_carlo:          Optional[SimulationOutput] = None
+    monte_carlo_optimal:  Optional[SimulationOutput] = None
+    garch_sim:            Optional[SimulationOutput] = None
+    garch_sim_optimal:    Optional[SimulationOutput] = None
+    regime_warning:       bool = False
 
 
 # ── Nested Sub-Models: ComplianceResult ───────────────────────────────────────

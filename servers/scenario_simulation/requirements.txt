@@ -1,0 +1,35 @@
+# servers/scenario_simulation/requirements.txt
+# Complete and self-contained — no shared base file (Option A)
+#
+# Install:
+#   cd servers/scenario_simulation
+#   python -m pip install -r requirements.txt
+#
+# Dependencies:
+#   numpy  — random path generation, Cholesky decomposition, CVaR computation
+#   scipy  — Student-t distribution fitting (scipy.stats.t.fit)
+#   arch   — GARCH parameter consumption for run_garch_simulation
+#            (parameters fitted by Risk Engine, consumed here for path generation)
+
+# MCP server SDK
+mcp==1.3.0
+
+# Data handling and computation
+numpy==1.26.4
+pandas==2.2.2
+
+# Student-t fitting for run_monte_carlo
+scipy==1.13.0
+
+# GARCH parameter consumption for run_garch_simulation
+# arch is not used for fitting here — only for type consistency
+# Fitting is done by Risk Engine (compute_garch_forecast)
+arch==6.3.0
+
+# Configuration and validation
+python-dotenv==1.0.1
+pydantic==2.7.4
+
+# Testing
+pytest==8.2.0
+pytest-asyncio==0.23.7
