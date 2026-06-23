@@ -52,10 +52,12 @@ Design decisions:
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-
 from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+
+import logging
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -67,9 +69,6 @@ from orchestrator.nodes.optimise import optimise
 from orchestrator.nodes.simulate import simulate
 from orchestrator.nodes.check_compliance import check_compliance
 from orchestrator.nodes.synthesise import synthesise
-
-# ── Environment ───────────────────────────────────────────────────────────────
-load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 logger = logging.getLogger(__name__)
 

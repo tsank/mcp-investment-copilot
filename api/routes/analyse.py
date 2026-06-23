@@ -7,11 +7,11 @@ Responsibilities:
     1. Accept AnalyseRequest (validated by FastAPI/Pydantic)
     2. Build AgentState from request
     3. Invoke investment_graph (async)
-    4. Extract result fields from final AgentState
+    4. Extract result fields from final state dict
     5. Return AnalyseResponse
 
-This file is intentionally thin — all business logic lives in the
-orchestrator. The route handler is pure translation: request → state → response.
+Note: LangGraph's ainvoke() returns a plain dict, not the typed AgentState.
+All field access uses dict.get() with safe defaults.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ async def analyse(request: AnalyseRequest) -> AnalyseResponse:
         list(request.portfolio.holdings.keys()),
     )
 
-    # ── Build AgentState ──────────────────────────────────────────────────────
+    # ── Build initial AgentState ──────────────────────────────────────────────
     initial_state = AgentState(
         query=request.query,
         portfolio=Portfolio(
@@ -75,8 +75,9 @@ async def analyse(request: AnalyseRequest) -> AnalyseResponse:
     )
 
     # ── Invoke graph ──────────────────────────────────────────────────────────
+    # LangGraph ainvoke() returns a plain dict, not a typed AgentState.
     try:
-        final_state: AgentState = await investment_graph.ainvoke(initial_state)
+        state: dict = await investment_graph.ainvoke(initial_state)
     except Exception as exc:
         logger.error("analyse: graph invocation failed — %s", exc)
         raise HTTPException(
@@ -86,29 +87,38 @@ async def analyse(request: AnalyseRequest) -> AnalyseResponse:
 
     logger.info(
         "analyse: completed — trace=%s errors=%s",
-        final_state.execution_trace,
-        final_state.errors,
+        state.get("execution_trace", []),
+        state.get("errors", []),
     )
 
     # ── Build response ────────────────────────────────────────────────────────
+    recommendation = state.get("final_recommendation") or \
+        "Analysis completed — no recommendation generated."
+
+    analysis_type = state.get("analysis_type")
+    if hasattr(analysis_type, "value"):
+        analysis_type = analysis_type.value
+    else:
+        analysis_type = str(analysis_type) if analysis_type else "full"
+
     return AnalyseResponse(
-        recommendation=final_state.final_recommendation or "Analysis completed — no recommendation generated.",
-        compliance=_build_compliance(final_state),
-        risk_metrics=_build_risk_metrics(final_state),
-        simulation=_build_simulation(final_state),
-        optimisation=_build_optimisation(final_state),
-        analysis_type=final_state.analysis_type.value,
-        execution_trace=final_state.execution_trace,
-        errors=final_state.errors,
+        recommendation=recommendation,
+        compliance=_build_compliance(state),
+        risk_metrics=_build_risk_metrics(state),
+        simulation=_build_simulation(state),
+        optimisation=_build_optimisation(state),
+        analysis_type=analysis_type,
+        execution_trace=state.get("execution_trace", []),
+        errors=state.get("errors", []),
     )
 
 
 # ── Response builders ─────────────────────────────────────────────────────────
 
-def _build_compliance(state: AgentState) -> ComplianceResponse | None:
-    if state.compliance_result is None:
+def _build_compliance(state: dict) -> ComplianceResponse | None:
+    cr = state.get("compliance_result")
+    if cr is None:
         return None
-    cr = state.compliance_result
     return ComplianceResponse(
         passed=cr.passed,
         violations=[ViolationResponse(**v.dict()) for v in cr.violations],
@@ -118,10 +128,10 @@ def _build_compliance(state: AgentState) -> ComplianceResponse | None:
     )
 
 
-def _build_risk_metrics(state: AgentState) -> RiskMetricsResponse | None:
-    if state.risk_metrics is None:
+def _build_risk_metrics(state: dict) -> RiskMetricsResponse | None:
+    rm = state.get("risk_metrics")
+    if rm is None:
         return None
-    rm = state.risk_metrics
     return RiskMetricsResponse(
         var_95=rm.var_95,
         var_99=rm.var_99,
@@ -136,10 +146,10 @@ def _build_risk_metrics(state: AgentState) -> RiskMetricsResponse | None:
     )
 
 
-def _build_simulation(state: AgentState) -> SimulationResponse | None:
-    if state.simulation_result is None:
+def _build_simulation(state: dict) -> SimulationResponse | None:
+    sr = state.get("simulation_result")
+    if sr is None:
         return None
-    sr = state.simulation_result
 
     def _sim_out(s) -> SimulationOutputResponse | None:
         if s is None:
@@ -164,10 +174,10 @@ def _build_simulation(state: AgentState) -> SimulationResponse | None:
     )
 
 
-def _build_optimisation(state: AgentState) -> OptimisationResponse | None:
-    if state.optimisation_result is None:
+def _build_optimisation(state: dict) -> OptimisationResponse | None:
+    opt = state.get("optimisation_result")
+    if opt is None:
         return None
-    opt = state.optimisation_result
     return OptimisationResponse(
         optimal_weights=opt.optimal_weights,
         expected_return=opt.expected_return,
