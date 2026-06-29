@@ -1,0 +1,145 @@
+/* App.css
+ *
+ * Global styles for MCP Investment Copilot.
+ * Scoped to avoid conflicts with component inline styles.
+ *
+ * Design system:
+ *   Background: #0A0F1E (deep navy)
+ *   Cards:      #1E2D4E
+ *   Accent:     #4F8EF7 (electric blue)
+ *   Text:       #E2E8F0
+ *   Fonts:      Inter (prose), IBM Plex Mono (numbers/code)
+ */
+
+/* ── Reset and base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #0A0F1E;
+  color: #E2E8F0;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── App shell ──────────────────────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ── Error banner ───────────────────────────────────────────────────────────── */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background-color: #450a0a;
+  border-bottom: 1px solid #E5535344;
+  color: #fca5a5;
+  font-size: 0.88rem;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.error-dismiss:hover {
+  color: #E55353;
+}
+
+/* ── Tab navigation ─────────────────────────────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 2px;
+  padding: 0 24px;
+  background-color: #111827;
+  border-bottom: 1px solid #1E2D4E;
+  overflow-x: auto;          /* horizontal scroll on small screens */
+  scrollbar-width: none;     /* hide scrollbar on Firefox */
+}
+
+.tab-nav::-webkit-scrollbar {
+  display: none;             /* hide scrollbar on Chrome/Safari */
+}
+
+.tab-btn {
+  padding: 12px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #94A3B8;
+  font-size: 0.88rem;
+  font-family: Inter, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: #E2E8F0;
+}
+
+.tab-btn--active {
+  color: #4F8EF7;
+  border-bottom-color: #4F8EF7;
+  font-weight: 600;
+}
+
+/* ── Tab content area ───────────────────────────────────────────────────────── */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* ── Scrollbar styling ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0A0F1E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1E2D4E;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4F8EF744;
+}
+
+/* ── Typography utilities ───────────────────────────────────────────────────── */
+.mono {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* ── Plotly chart overrides ─────────────────────────────────────────────────── */
+/* Ensure Plotly modebar matches dark theme */
+.modebar {
+  background: transparent !important;
+}
+
+.modebar-btn path {
+  fill: #94A3B8 !important;
+}
+
+.modebar-btn:hover path {
+  fill: #4F8EF7 !important;
+}

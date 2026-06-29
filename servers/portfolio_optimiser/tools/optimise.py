@@ -521,9 +521,12 @@ def optimise_portfolio(
         )
 
     # ── Parse constraints ─────────────────────────────────────────
+    # Default max_weight: 0.40 — prevents corner solutions in v1 fixture data.
+    # Callers can override via constraints={"max_weight": x}.
+    # v2 will add sector_caps for more granular concentration control.
     constraints = constraints or {}
     min_weight    = float(constraints.get("min_weight", 0.0))
-    max_weight    = float(constraints.get("max_weight", 1.0))
+    max_weight    = float(constraints.get("max_weight", 0.4))
     target_return = constraints.get("target_return", None)
 
     if min_weight < 0:
