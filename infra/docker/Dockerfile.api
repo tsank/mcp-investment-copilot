@@ -1,0 +1,74 @@
+# infra/docker/Dockerfile.api
+#
+# Production image for the MCP Investment Copilot API.
+#
+# Bundles:
+#   - api/            FastAPI app (entry point)
+#   - orchestrator/    LangGraph orchestration layer
+#   - servers/         5 MCP servers, spawned as stdio subprocesses
+#                       using sys.executable (this image's single
+#                       Python interpreter) — see
+#                       orchestrator/clients/mcp_client_factory.py
+#   - data/fixtures/   CSV fixtures read by the market_data server (448K, baked in)
+#
+# Excluded:
+#   - .env             secrets are injected at runtime via AWS Secrets Manager,
+#                       never baked into the image
+#   - tests/, .git/, ui-react/, infra/  not needed at runtime
+#
+# Run locally to verify before pushing to ECR:
+#   docker build -f infra/docker/Dockerfile.api -t mcp-copilot-api:local .
+#   docker run --rm -p 8080:8080 --env-file .env mcp-copilot-api:local
+
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# System deps needed to build some Python packages (e.g. scipy, arch)
+# from wheels/source on slim base images.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Install dependencies ─────────────────────────────────────────────────────
+# Each service keeps its own complete, self-contained requirements.txt
+# (Option A — no shared base file). We install all of them into this
+# single image's Python environment, since mcp_client_factory.py spawns
+# every MCP server using sys.executable (this same interpreter).
+COPY api/requirements.txt ./req-api.txt
+COPY orchestrator/requirements.txt ./req-orchestrator.txt
+COPY servers/market_data/requirements.txt ./req-market_data.txt
+COPY servers/risk_engine/requirements.txt ./req-risk_engine.txt
+COPY servers/portfolio_optimiser/requirements.txt ./req-portfolio_optimiser.txt
+COPY servers/scenario_simulation/requirements.txt ./req-scenario_simulation.txt
+COPY servers/compliance/requirements.txt ./req-compliance.txt
+
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    python -m pip install --no-cache-dir -r req-api.txt && \
+    python -m pip install --no-cache-dir -r req-orchestrator.txt && \
+    python -m pip install --no-cache-dir -r req-market_data.txt && \
+    python -m pip install --no-cache-dir -r req-risk_engine.txt && \
+    python -m pip install --no-cache-dir -r req-portfolio_optimiser.txt && \
+    python -m pip install --no-cache-dir -r req-scenario_simulation.txt && \
+    python -m pip install --no-cache-dir -r req-compliance.txt
+
+# ── Copy application code ────────────────────────────────────────────────────
+# Folder structure must mirror the project root exactly, since
+# orchestrator/clients/mcp_client_factory.py resolves PROJECT_ROOT as
+# three levels up from itself and builds server paths relative to it
+# (e.g. PROJECT_ROOT / "servers" / "market_data" / "server.py").
+COPY api/ ./api/
+COPY orchestrator/ ./orchestrator/
+COPY servers/ ./servers/
+COPY data/fixtures/ ./data/fixtures/
+
+# .env is intentionally NOT copied — secrets come from AWS Secrets Manager
+# at container runtime via ECS task definition environment injection.
+
+EXPOSE 8080
+
+# Single worker — the LangGraph graph is compiled once at import time
+# (see api/main.py docstring). Multiple workers would each compile their
+# own graph, which is unnecessary for v1's traffic volume.
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
