@@ -1,0 +1,42 @@
+{
+  "family": "mcp-copilot-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::442421142920:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "mcp-copilot-api",
+      "image": "442421142920.dkr.ecr.ap-south-1.amazonaws.com/mcp-copilot-api:v1",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:442421142920:secret:mcp-copilot/openai-api-key-LJfsms"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MARKET_DATA_SOURCE",
+          "value": "fixture"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mcp-copilot-api",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "essential": true
+    }
+  ]
+}

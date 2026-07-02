@@ -1,0 +1,30 @@
+{
+  "family": "mcp-copilot-ui",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::442421142920:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "mcp-copilot-ui",
+      "image": "442421142920.dkr.ecr.ap-south-1.amazonaws.com/mcp-copilot-ui:v1",
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mcp-copilot-ui",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "essential": true
+    }
+  ]
+}
