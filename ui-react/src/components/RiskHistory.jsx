@@ -189,15 +189,17 @@ export default function RiskHistory({ riskMetrics, simulation, loading }) {
     height: 360,
     xaxis:  {
       ...BASE_LAYOUT.xaxis,
-      title: "Trading Days Forward",
+      title: { text: "Trading Days Forward" },
+      type:  "linear",
       dtick: 1,
     },
     yaxis:  {
       ...BASE_LAYOUT.yaxis,
-      title:      "Annualised Volatility (%)",
+      title:      { text: "Annualised Volatility (%)" },
+      type:       "linear",
       ticksuffix: "%",
     },
-    margin: { l: 80, r: 40, t: 50, b: 60 },
+    margin: { l: 80, r: 40, t: 50, b: 70 },
     shapes: [{
       type: "line",
       xref: "paper", yref: "y",
@@ -236,9 +238,9 @@ export default function RiskHistory({ riskMetrics, simulation, loading }) {
     ...BASE_LAYOUT,
     title:  "Rolling CVaR 95% — 2-Year History (252-day window)",
     height: 360,
-    xaxis:  { ...BASE_LAYOUT.xaxis, title: "Trading Days", dtick: 50 },
-    yaxis:  { ...BASE_LAYOUT.yaxis, title: "CVaR 95% (%)", ticksuffix: "%" },
-    margin: { l: 80, r: 40, t: 50, b: 60 },
+    xaxis:  { ...BASE_LAYOUT.xaxis, title: {text: "Trading Days" }, type: "linear", dtick: 50 },
+    yaxis:  { ...BASE_LAYOUT.yaxis, title: {text: "CVaR 95% (%)" } , type: "linear", ticksuffix: "%" },
+    margin: { l: 80, r: 40, t: 50, b: 70 },
     shapes: [
       {
         type: "line", xref: "paper", yref: "y",

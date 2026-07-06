@@ -211,12 +211,14 @@ export default function EfficientFrontier({ optimisation, riskMetrics, loading }
     xaxis: {
       ...BASE_LAYOUT.xaxis,
       title:      "Annualised Volatility",
+      type:       "linear",
       tickformat: ".0%",
       range:      [xMin, xMax],
     },
     yaxis: {
       ...BASE_LAYOUT.yaxis,
       title:      "Annualised Expected Return",
+      type:       "linear",
       tickformat: ".1%",
       range:      [yMin, yMax],
     },

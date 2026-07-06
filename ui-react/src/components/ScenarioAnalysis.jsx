@@ -196,12 +196,14 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
     height: 400,
     xaxis:  { 
         ...BASE_LAYOUT.xaxis, 
-        title: "Trading Days", 
+        title: { text: "Trading Days" }, 
+        type:  "linear",
         dtick: 50,
     },
     yaxis:  {
       ...BASE_LAYOUT.yaxis,
-      title:      "Portfolio Value (INR ₹)",
+      title:      { text: "Portfolio Value (INR ₹)", standoff: 20 },
+      type:       "linear",
       tickformat: ",.0f",
       tickprefix: "₹",
     },
@@ -210,7 +212,7 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
         l: 150,  // room for y-axis label + title
         r: 40,   
         t: 50,   // room for chart title
-        b: 60    // room for x-axis title
+        b: 70    // room for x-axis title
     },
     shapes: [{
       type: "line",
@@ -253,12 +255,13 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
 
   const distLayout = {
     ...BASE_LAYOUT,
-    title:  "1-Year Terminal Return Distribution (Monte Carlo)",
+    title:  "1-Year Terminal Return",
     height: 320,
-    xaxis:  { ...BASE_LAYOUT.xaxis, title: "Portfolio Return", tickformat: ".0%" },
-    yaxis:  { ...BASE_LAYOUT.yaxis, title: "Density" },
+    xaxis:  { ...BASE_LAYOUT.xaxis, title: "Portfolio Return", type: "linear", tickformat: ".0%" },
+    yaxis:  { ...BASE_LAYOUT.yaxis, title: "Density", type: "linear" },
+    legend: { ...BASE_LAYOUT.legend, orientation: "h", x: 0.5, xanchor: "center", y: -0.2 },
     shapes: distShapes,
-    margin: { ...BASE_LAYOUT.margin, t: 40 },
+    margin: { ...BASE_LAYOUT.margin, l: 50, t: 40, r: 20 },
   };
 
   // ── CVaR comparison bar data ───────────────────────────────────────────────
@@ -280,9 +283,11 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
     x:            metrics,
     y:            d.vals,
     marker:       { color: d.color, opacity: 0.85 },
-    text:         d.vals.map(v => `${v.toFixed(1)}%`),
+    text:         d.vals.map(v => `${v.toFixed(0)}%`),
     textposition: "outside",
-    textfont:     { color: C.white, size: 10 },
+    textangle:    -90,
+    textfont:     { color: d.color, size: 10 },
+    hovertemplate: "%{x}: %{y:.0f}%<extra></extra>",
   }));
 
   const cvarLayout = {
@@ -290,25 +295,29 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
     title:   "Risk Metrics: MC vs GARCH — Current vs Optimal",
     height:  320,
     barmode: "group",
-    yaxis:   { ...BASE_LAYOUT.yaxis, title: "Risk (%)", ticksuffix: "%" },
+    xaxis:   { ...BASE_LAYOUT.xaxis, type: "category" },
+    yaxis:   { ...BASE_LAYOUT.yaxis, title: "Risk (%)", type: "linear", ticksuffix: "%", range: [0, 60] },
+    legend:  { ...BASE_LAYOUT.legend, orientation: "h", x: 0.5, xanchor: "center", y: -0.25 },
+    margin:  { ...BASE_LAYOUT.margin, l: 45, r: 20 },
     shapes: [{
       type: "line",
       xref: "paper", yref: "y",
       x0:   0, x1:   1,
       y0:   25, y1:  25,
-      line: { color: C.red, width: 1.5, dash: "dash" },
+      line: { color: C.white, width: 1.5, dash: "dash" },
     }],
     annotations: [{
-      x:         0.02,
+      x:         0.98,
       y:         25,
       xref:      "paper",
       yref:      "y",
       text:      "CVaR Limit (25%)",
       showarrow: false,
-      font:      { color: C.red, size: 10 },
+      font:      { color: C.white, size: 10 },
       yanchor:   "bottom",
+      xanchor:   "right",
     }],
-    margin: { ...BASE_LAYOUT.margin, t: 40 },
+    margin: { ...BASE_LAYOUT.margin, l: 45, r: 20, t: 40 },
   };
 
   const config = {
@@ -346,7 +355,7 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
       {/* Distribution + CVaR bars — side by side */}
       <div style={styles.row}>
         <div style={styles.card}>
-          <div style={styles.cardTitle}>Terminal Return Distribution</div>
+          <div style={styles.cardTitle}>1-Year Terminal Return Distribution (Monte Carlo)</div>
           <Plot
             data={distData}
             layout={distLayout}

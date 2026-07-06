@@ -190,12 +190,13 @@ export default function RebalancingAction({ optimisation, portfolio, loading }) 
     xaxis: {
       ...BASE_LAYOUT.xaxis,
       ticksuffix: "%",
+      type:       "linear",
       range:      [0, xMax],
       dtick:      10,
       autorange:  false,
       fixedrange: true,   // prevent user zoom from breaking range
     },
-    yaxis:  { ...BASE_LAYOUT.yaxis, automargin: true },
+    yaxis:  { ...BASE_LAYOUT.yaxis, type: "category", automargin: true },
     legend: { ...BASE_LAYOUT.legend, orientation: "h", y: -0.15 },
     margin: { ...BASE_LAYOUT.margin, l: 90, r: 60 },
   };
@@ -211,6 +212,7 @@ export default function RebalancingAction({ optimisation, portfolio, loading }) 
     xaxis: {
       ...BASE_LAYOUT.xaxis,
       ticksuffix:    "%",
+      type:          "linear",
       range:         [-deltaXMax, deltaXMax],
       dtick:         10,
       autorange:     false,
@@ -220,7 +222,7 @@ export default function RebalancingAction({ optimisation, portfolio, loading }) 
       zerolinewidth: 2,
       tickvals:      [-deltaXMax, -deltaXMax/2, 0, deltaXMax/2, deltaXMax]
     },
-    yaxis:      { ...BASE_LAYOUT.yaxis, automargin: true },
+    yaxis:      { ...BASE_LAYOUT.yaxis, type: "category", automargin: true },
     margin:     { ...BASE_LAYOUT.margin, l: 90, r: 60 },
     showlegend: false,
   };
