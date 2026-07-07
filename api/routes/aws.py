@@ -1,7 +1,7 @@
 """
 api/routes/aws.py
 
-AWS ECS control endpoints for the MCP Investment Copilot.
+AWS ECS control endpoints for the Portfolio Copilot.
 
 Endpoints:
     GET  /api/v1/aws/status  — returns running/desired count for both services

@@ -1,7 +1,7 @@
 """
 api/main.py
 
-FastAPI application entry point for the MCP Investment Copilot.
+FastAPI application entry point for the Portfolio Copilot.
 
 Registers:
     - /api/v1/analyse  POST  — portfolio analysis endpoint
@@ -40,7 +40,7 @@ logger = logging.getLogger("api")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="MCP Investment Copilot",
+    title="Portfolio Copilot",
     description=(
         "Agentic portfolio analysis system using LangGraph orchestration "
         "and 5 MCP servers: Market Data, Risk Engine, Portfolio Optimiser, "
@@ -78,7 +78,7 @@ async def health() -> dict:
 async def root() -> dict:
     """API info and available endpoints."""
     return {
-        "service":  "MCP Investment Copilot",
+        "service":  "Portfolio Copilot",
         "version":  "1.0.0",
         "endpoints": {
             "analyse": "POST /api/v1/analyse",

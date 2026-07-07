@@ -298,7 +298,6 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
     xaxis:   { ...BASE_LAYOUT.xaxis, type: "category" },
     yaxis:   { ...BASE_LAYOUT.yaxis, title: "Risk (%)", type: "linear", ticksuffix: "%", range: [0, 60] },
     legend:  { ...BASE_LAYOUT.legend, orientation: "h", x: 0.5, xanchor: "center", y: -0.25 },
-    margin:  { ...BASE_LAYOUT.margin, l: 45, r: 20 },
     shapes: [{
       type: "line",
       xref: "paper", yref: "y",

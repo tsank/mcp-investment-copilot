@@ -183,7 +183,7 @@ export default function Header() {
 
       {/* Left side — title */}
       <div>
-        <h1 style={styles.title}>⚡ MCP Investment Copilot</h1>
+        <h1 style={styles.title}>⚡ Portfolio Copilot</h1>
         <div style={styles.subtitle}>
           Agentic portfolio analysis · LangGraph orchestration · 5 MCP servers
         </div>
