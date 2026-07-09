@@ -2,3 +2,14 @@ langgraph>=0.2.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 mcp>=1.0.0
+
+# Added for v2 — MCP servers now called as in-process functions
+# instead of subprocesses, so their dependencies move here.
+# Versions match each server's original requirements.txt exactly
+# (confirmed no version conflicts during v1 Docker setup).
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.0
+arch==6.3.0
+yfinance==0.2.40
+pyyaml==6.0.1
