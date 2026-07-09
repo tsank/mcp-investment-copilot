@@ -53,10 +53,11 @@ Design decisions:
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 
-from orchestrator.clients.mcp_client_factory import get_client
+from servers.risk_engine.tools.risk_metrics import compute_risk_metrics
+from servers.risk_engine.tools.garch_forecast import compute_garch_forecast
 from orchestrator.state import (
     AgentState,
     GARCHAssetResult,
@@ -99,39 +100,42 @@ async def compute_risk(state: AgentState) -> dict:
     logger.info("compute_risk: starting — %d symbols", len(state.symbols))
 
     try:
-        async with get_client("risk_engine") as (session, _tools):
-
-            # ── Call 1: risk metrics ──────────────────────────────────────────
-            logger.info("compute_risk: calling compute_risk_metrics")
-            risk_result = await session.call_tool(
-                "compute_risk_metrics",
-                {
-                    "log_returns":    state.market_data.log_returns,
-                    "weights":        state.portfolio.holdings,
-                    "prices":         state.market_data.prices,
-                    "risk_free_rate": _RISK_FREE_RATE,
-                },
-            )
-            risk_data = json.loads(risk_result.content[0].text)
-            logger.info(
-                "compute_risk: risk_metrics ok — cvar_95=%.4f sharpe=%.4f",
-                risk_data["cvar_95"], risk_data["sharpe_ratio"],
-            )
-
-            # ── Call 2: GARCH forecast ────────────────────────────────────────
-            logger.info("compute_risk: calling compute_garch_forecast")
-            garch_result = await session.call_tool(
-                "compute_garch_forecast",
-                {
-                    "log_returns":  state.market_data.log_returns,
-                    "horizon_days": _GARCH_HORIZON,
-                },
-            )
-            garch_data = json.loads(garch_result.content[0].text)
-            logger.info(
-                "compute_risk: garch_forecast ok — model=%s innovations=%s",
-                garch_data["garch_model"], garch_data["innovations_used"],
-            )
+        # --- Call 1: risk metrics -----------------------------
+        # Direct function call (v2 - Option B). No subprocess, no JSON
+        # round trip. compute_risk_metrics already returns a plain dict
+        # of native Python types(confirmed: explicit float() casts
+        # throughout risk_metrics.py), so risk_data is used exactly as 
+        # risk_data was before, just without the json.loads() step.
+        
+        logger.info("compute_risk: calling compute_risk_metrics")
+        risk_data = await asyncio.to_thread(
+            compute_risk_metrics,
+            log_returns = state.market_data.log_returns,
+            weights = state.portfolio.holdings,
+            prices = state.market_data.prices,
+            risk_free_rate = _RISK_FREE_RATE,
+        )
+        logger.info(
+            "compute_risk: risk_metrics ok - cvar_95=%.4f sharpe=%.4f",
+            risk_data["cvar_95"], risk_data["sharpe_ratio"],
+        )
+        
+        # --- Call 2: GARCH forecast ----------------------------
+        # asyncio.to_thread() runs this synchronous, CPU heavy MLE fit
+        # in a background thread rather than blocking the event loop
+        # directly - matters once this orchestrator may be handling 
+        # more than one request at a time (eg concurrent Lambda 
+        # invocatons)
+        logger.info("compute_risk: calling compute_garch_forecast")
+        garch_data = await asyncio.to_thread(
+            compute_garch_forecast,
+            log_returns=state.market_data.log_returns,
+            horizon_days =_GARCH_HORIZON,
+        )
+        logger.info(
+            "compute_risk: garch_forecast ok - model=%s innovations=%s",
+            garch_data["garch_model"], garch_data["innovations_used"],
+        )
 
     except Exception as exc:
         logger.error("compute_risk: failed — %s", exc)
