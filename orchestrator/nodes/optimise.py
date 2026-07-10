@@ -26,11 +26,6 @@ MCP tools called:
 
 Design decisions:
 
-    call_tool() convenience wrapper used here:
-        optimise makes exactly one tool call to one server.
-        No need to hold the ClientSession open for multiple calls.
-        call_tool() opens, calls, closes in one step.
-
     risk_free_rate passed from risk_metrics:
         The same RFR used for Sharpe computation in compute_risk is
         passed to the optimiser for consistency. Both nodes must use
@@ -59,8 +54,9 @@ Design decisions:
 from __future__ import annotations
 
 import logging
+import asyncio
 
-from orchestrator.clients.mcp_client_factory import call_tool
+from servers.portfolio_optimiser.tools.optimise import optimise_portfolio
 from orchestrator.state import (
     AgentState,
     FrontierPoint,
@@ -104,15 +100,15 @@ async def optimise(state: AgentState) -> dict:
     logger.info("optimise: starting — %d symbols", len(state.symbols))
 
     try:
-        data = await call_tool(
-            server_name="portfolio_optimiser",
-            tool_name="optimise_portfolio",
-            arguments={
-                "log_returns":       state.market_data.log_returns,
-                "risk_free_rate":    state.risk_metrics.risk_free_rate,
-                "n_frontier_points": _N_FRONTIER_POINTS,
-                "solver":            _SOLVER,
-            },
+        # Direct function call (v2 - Option B). No subprocess, no JSON round trip. Wrapped in asyncio.to_thread()
+        # since this is genuinely CPU-heavy - SLSQP solver plus a 50-point efficient frontier scan - and would otherwise
+        # block the event loop. 
+        data = await asyncio.to_thread(
+            optimise_portfolio,
+            log_returns=state.market_data.log_returns,
+            risk_free_rate=state.risk_metrics.risk_free_rate,
+            n_frontier_points=_N_FRONTIER_POINTS,
+            solver=_SOLVER,
         )
         logger.info(
             "optimise: ok — sharpe=%.4f return=%.4f vol=%.4f solver=%s",
