@@ -23,11 +23,6 @@ MCP tools called (both against "market_data" server):
 
 Design decisions:
 
-    Single subprocess — both tool calls share one ClientSession.
-    get_client() is used directly (not call_tool()) so the subprocess
-    is spawned once and both calls go over the same stdio pipe.
-    This halves subprocess overhead for this node.
-
     Period hardcoded to "2y" in v1:
         Consistent with fixture data downloaded by scripts/download_fixtures.py.
         Promoted to a configurable parameter in v2 when live feed is added.
@@ -53,7 +48,8 @@ from __future__ import annotations
 
 import logging
 
-from orchestrator.clients.mcp_client_factory import get_client
+from servers.market_data.tools.price_history import get_price_history
+from servers.market_data.tools.fundamentals import get_fundamentals
 from orchestrator.state import AgentState, FundamentalData, MarketDataResult
 
 logger = logging.getLogger(__name__)
@@ -80,38 +76,32 @@ async def fetch_market_data(state: AgentState) -> dict:
     logger.info("fetch_market_data: symbols=%s period=%s", state.symbols, _PERIOD)
 
     try:
-        async with get_client("market_data") as (session, _tools):
+        # ── Call 1: price history ─────────────────────────────────────────
+        # Direct function call (v2 - Option B). No subprocess, no JSON
+        # round trip, get_price_history is light (reads a CSV fixture in
+        # v1), so no asyncio.to_thread() needed here - the small blocking
+        # cost is not worth the thread-handoff overhead.
+        logger.info("fetch_market_data: calling get_price_history")
+        price_data = get_price_history(
+            symbols=state.symbols,
+            period=_PERIOD,
+            return_type=_RETURN_TYPE,
+        )
+        logger.info(
+            "fetch_market_data: get_price_history ok — %d symbols, %d dates",
+            len(price_data["prices"]),
+            len(price_data["dates"]),
+        )
 
-            # ── Call 1: price history ─────────────────────────────────────────
-            logger.info("fetch_market_data: calling get_price_history")
-            price_result = await session.call_tool(
-                "get_price_history",
-                {
-                    "symbols":     state.symbols,
-                    "period":      _PERIOD,
-                    "return_type": _RETURN_TYPE,
-                },
-            )
-            import json
-            price_data = json.loads(price_result.content[0].text)
-            logger.info(
-                "fetch_market_data: get_price_history ok — %d symbols, %d dates",
-                len(price_data["prices"]),
-                len(price_data["dates"]),
-            )
-
-            # ── Call 2: fundamentals ──────────────────────────────────────────
-            logger.info("fetch_market_data: calling get_fundamentals")
-            fund_result = await session.call_tool(
-                "get_fundamentals",
-                {"symbols": state.symbols},
-            )
-            fund_data = json.loads(fund_result.content[0].text)
-            logger.info(
-                "fetch_market_data: get_fundamentals ok — %d found, %d missing",
-                len(fund_data["fundamentals"]),
-                len(fund_data.get("missing", [])),
-            )
+        # ── Call 2: fundamentals ──────────────────────────────────────────
+        # Also light (CSV fxiture read) - no threading needed
+        logger.info("fetch_market_data: calling get_fundamentals")
+        fund_data = get_fundamentals(symbols=state.symbols)
+        logger.info(
+            "fetch_market_data: get_fundamentals ok — %d found, %d missing",
+            len(fund_data["fundamentals"]),
+            len(fund_data.get("missing", [])),
+        )
 
     except Exception as exc:
         logger.error("fetch_market_data: failed — %s", exc)
