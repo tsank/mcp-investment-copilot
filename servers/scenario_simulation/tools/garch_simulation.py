@@ -65,11 +65,24 @@ import numpy as np
 from scipy import stats
 
 # Import shared terminal value and risk metric utilities from monte_carlo
-from tools.monte_carlo import (
-    _compute_cvar_var,
-    _compute_percentiles,
-    _compute_terminal_values,
-)
+# Import shared terminal value and risk metric utilities from monte_carlo.
+# Try/except handles two different invocation contexts: imported from the
+# project root (v2 Option B — orchestrator calling this directly) needs the
+# package-qualified form; run standalone (python server.py, or pytest from
+# within servers/scenario_simulation/) needs the bare form, since the
+# servers package isn't on the path in that context.
+try:
+    from servers.scenario_simulation.tools.monte_carlo import (
+        _compute_cvar_var,
+        _compute_percentiles,
+        _compute_terminal_values,
+    )
+except ImportError:
+    from tools.monte_carlo import (
+        _compute_cvar_var,
+        _compute_percentiles,
+        _compute_terminal_values,
+    )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 TRADING_DAYS_PER_YEAR = 252

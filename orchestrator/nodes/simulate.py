@@ -5,7 +5,7 @@ Node 5 of 7 — simulate
 
 Responsibility:
     Call the Scenario Simulation Server to run four simulation variants:
-        1. monte_carlo        — IID static, CURRENT weights
+        1. monte_carlo         — IID static, CURRENT weights
         2. monte_carlo_optimal — IID static, OPTIMAL weights (if available)
         3. garch_sim           — GARCH-conditional, CURRENT weights
         4. garch_sim_optimal   — GARCH-conditional, OPTIMAL weights (if available)
@@ -28,10 +28,6 @@ MCP tools called (both against "scenario_simulation" server):
     2. run_garch_simulation — called up to twice (current + optimal weights)
 
 Design decisions:
-
-    Single subprocess for all four calls:
-        All four tool calls share one ClientSession to scenario_simulation.
-        One subprocess spawn, four calls, one teardown.
 
     Optimal weight calls are conditional:
         If optimisation_result is None (RISK or SIMULATION analysis type,
@@ -66,8 +62,11 @@ Design decisions:
 from __future__ import annotations
 
 import logging
+import asyncio
 
-from orchestrator.clients.mcp_client_factory import get_client
+from servers.scenario_simulation.tools.monte_carlo import run_monte_carlo
+from servers.scenario_simulation.tools.garch_simulation import run_garch_simulation
+
 from orchestrator.state import (
     AgentState,
     PercentileDistribution,
@@ -89,9 +88,9 @@ async def simulate(state: AgentState) -> dict:
     """
     LangGraph node — simulate.
 
-    Opens one ClientSession to the Scenario Simulation Server and makes
-    up to four tool calls: run_monte_carlo and run_garch_simulation,
-    each called for current weights and (if available) optimal weights.
+    Makes up to four direct function calls: run_monte_carlo and
+    run_garch_simulation, each called for current weights and
+    (if available) optimal weights.
 
     Args:
         state: Current AgentState.
@@ -125,7 +124,6 @@ async def simulate(state: AgentState) -> dict:
     )
 
     # ── Serialise GARCH handoff fields ────────────────────────────────────────
-    # GARCHParams are Pydantic models — convert to plain dicts for JSON
     garch_params_dict = {
         symbol: params.dict()
         for symbol, params in state.garch_result.garch_params.items()
@@ -139,106 +137,94 @@ async def simulate(state: AgentState) -> dict:
     gc_optimal:  SimulationOutput | None = None
     errors_this_node: list[str] = []
 
+    # ── 1. Monte Carlo — current weights ────────────────────────────────────────
+    # Direct function call (v2 — Option B). No subprocess, no JSON round-trip.
+    # Wrapped in asyncio.to_thread() — genuinely CPU-heavy (10,000 simulated
+    # paths). Each of the four calls is individually try/excepted, same as
+    # before — a failure in one shouldn't prevent the other three from
+    # running, matching the "non-fatal individual failures" design decision.
     try:
-        async with get_client("scenario_simulation") as (session, _tools):
-
-            # ── 1. Monte Carlo — current weights ──────────────────────────────
-            try:
-                logger.info("simulate: run_monte_carlo (current weights)")
-                raw = await session.call_tool(
-                    "run_monte_carlo",
-                    {
-                        "log_returns":   state.market_data.log_returns,
-                        "weights":       current_weights,
-                        "horizon_days":  _HORIZON_DAYS,
-                        "n_simulations": _N_SIMULATIONS,
-                        "distribution":  _DISTRIBUTION,
-                        "random_seed":   _RANDOM_SEED,
-                    },
-                )
-                import json
-                mc_current = _parse_simulation_output(json.loads(raw.content[0].text))
-                logger.info("simulate: mc_current ok — cvar_95=%.4f", mc_current.cvar_95)
-            except Exception as exc:
-                logger.warning("simulate: run_monte_carlo (current) failed — %s", exc)
-                errors_this_node.append(f"simulate.mc_current: {exc}")
-
-            # ── 2. Monte Carlo — optimal weights ──────────────────────────────
-            if optimal_weights is not None:
-                try:
-                    logger.info("simulate: run_monte_carlo (optimal weights)")
-                    raw = await session.call_tool(
-                        "run_monte_carlo",
-                        {
-                            "log_returns":   state.market_data.log_returns,
-                            "weights":       optimal_weights,
-                            "horizon_days":  _HORIZON_DAYS,
-                            "n_simulations": _N_SIMULATIONS,
-                            "distribution":  _DISTRIBUTION,
-                            "random_seed":   _RANDOM_SEED,
-                        },
-                    )
-                    mc_optimal = _parse_simulation_output(json.loads(raw.content[0].text))
-                    logger.info("simulate: mc_optimal ok — cvar_95=%.4f", mc_optimal.cvar_95)
-                except Exception as exc:
-                    logger.warning("simulate: run_monte_carlo (optimal) failed — %s", exc)
-                    errors_this_node.append(f"simulate.mc_optimal: {exc}")
-            else:
-                logger.info("simulate: skipping mc_optimal — no optimisation_result")
-
-            # ── 3. GARCH simulation — current weights ─────────────────────────
-            try:
-                logger.info("simulate: run_garch_simulation (current weights)")
-                raw = await session.call_tool(
-                    "run_garch_simulation",
-                    {
-                        "log_returns":   state.market_data.log_returns,
-                        "weights":       current_weights,
-                        "garch_params":  garch_params_dict,
-                        "current_vols":  current_vols_dict,
-                        "horizon_days":  _HORIZON_DAYS,
-                        "n_simulations": _N_SIMULATIONS,
-                        "random_seed":   _RANDOM_SEED,
-                    },
-                )
-                gc_current = _parse_simulation_output(json.loads(raw.content[0].text))
-                logger.info("simulate: gc_current ok — cvar_95=%.4f", gc_current.cvar_95)
-            except Exception as exc:
-                logger.warning("simulate: run_garch_simulation (current) failed — %s", exc)
-                errors_this_node.append(f"simulate.gc_current: {exc}")
-
-            # ── 4. GARCH simulation — optimal weights ─────────────────────────
-            if optimal_weights is not None:
-                try:
-                    logger.info("simulate: run_garch_simulation (optimal weights)")
-                    raw = await session.call_tool(
-                        "run_garch_simulation",
-                        {
-                            "log_returns":   state.market_data.log_returns,
-                            "weights":       optimal_weights,
-                            "garch_params":  garch_params_dict,
-                            "current_vols":  current_vols_dict,
-                            "horizon_days":  _HORIZON_DAYS,
-                            "n_simulations": _N_SIMULATIONS,
-                            "random_seed":   _RANDOM_SEED,
-                        },
-                    )
-                    gc_optimal = _parse_simulation_output(json.loads(raw.content[0].text))
-                    logger.info("simulate: gc_optimal ok — cvar_95=%.4f", gc_optimal.cvar_95)
-                except Exception as exc:
-                    logger.warning("simulate: run_garch_simulation (optimal) failed — %s", exc)
-                    errors_this_node.append(f"simulate.gc_optimal: {exc}")
-            else:
-                logger.info("simulate: skipping gc_optimal — no optimisation_result")
-
+        logger.info("simulate: run_monte_carlo (current weights)")
+        mc_current = _parse_simulation_output(
+            await asyncio.to_thread(
+                run_monte_carlo,
+                log_returns=state.market_data.log_returns,
+                weights=current_weights,
+                horizon_days=_HORIZON_DAYS,
+                n_simulations=_N_SIMULATIONS,
+                distribution=_DISTRIBUTION,
+                random_seed=_RANDOM_SEED,
+            )
+        )
+        logger.info("simulate: mc_current ok — cvar_95=%.4f", mc_current.cvar_95)
     except Exception as exc:
-        # Outer exception — ClientSession failed to open
-        logger.error("simulate: ClientSession failed — %s", exc)
-        return {
-            "simulation_result": None,
-            "execution_trace":   state.execution_trace + ["simulate:error"],
-            "errors":            state.errors + [f"simulate: {exc}"],
-        }
+        logger.warning("simulate: run_monte_carlo (current) failed — %s", exc)
+        errors_this_node.append(f"simulate.mc_current: {exc}")
+
+    # ── 2. Monte Carlo — optimal weights ────────────────────────────────────────
+    if optimal_weights is not None:
+        try:
+            logger.info("simulate: run_monte_carlo (optimal weights)")
+            mc_optimal = _parse_simulation_output(
+                await asyncio.to_thread(
+                    run_monte_carlo,
+                    log_returns=state.market_data.log_returns,
+                    weights=optimal_weights,
+                    horizon_days=_HORIZON_DAYS,
+                    n_simulations=_N_SIMULATIONS,
+                    distribution=_DISTRIBUTION,
+                    random_seed=_RANDOM_SEED,
+                )
+            )
+            logger.info("simulate: mc_optimal ok — cvar_95=%.4f", mc_optimal.cvar_95)
+        except Exception as exc:
+            logger.warning("simulate: run_monte_carlo (optimal) failed — %s", exc)
+            errors_this_node.append(f"simulate.mc_optimal: {exc}")
+    else:
+        logger.info("simulate: skipping mc_optimal — no optimisation_result")
+
+    # ── 3. GARCH simulation — current weights ───────────────────────────────────
+    try:
+        logger.info("simulate: run_garch_simulation (current weights)")
+        gc_current = _parse_simulation_output(
+            await asyncio.to_thread(
+                run_garch_simulation,
+                log_returns=state.market_data.log_returns,
+                weights=current_weights,
+                garch_params=garch_params_dict,
+                current_vols=current_vols_dict,
+                horizon_days=_HORIZON_DAYS,
+                n_simulations=_N_SIMULATIONS,
+                random_seed=_RANDOM_SEED,
+            )
+        )
+        logger.info("simulate: gc_current ok — cvar_95=%.4f", gc_current.cvar_95)
+    except Exception as exc:
+        logger.warning("simulate: run_garch_simulation (current) failed — %s", exc)
+        errors_this_node.append(f"simulate.gc_current: {exc}")
+
+    # ── 4. GARCH simulation — optimal weights ───────────────────────────────────
+    if optimal_weights is not None:
+        try:
+            logger.info("simulate: run_garch_simulation (optimal weights)")
+            gc_optimal = _parse_simulation_output(
+                await asyncio.to_thread(
+                    run_garch_simulation,
+                    log_returns=state.market_data.log_returns,
+                    weights=optimal_weights,
+                    garch_params=garch_params_dict,
+                    current_vols=current_vols_dict,
+                    horizon_days=_HORIZON_DAYS,
+                    n_simulations=_N_SIMULATIONS,
+                    random_seed=_RANDOM_SEED,
+                )
+            )
+            logger.info("simulate: gc_optimal ok — cvar_95=%.4f", gc_optimal.cvar_95)
+        except Exception as exc:
+            logger.warning("simulate: run_garch_simulation (optimal) failed — %s", exc)
+            errors_this_node.append(f"simulate.gc_optimal: {exc}")
+    else:
+        logger.info("simulate: skipping gc_optimal — no optimisation_result")
 
     # ── Compute regime_warning ────────────────────────────────────────────────
     regime_warning = False
