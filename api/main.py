@@ -24,6 +24,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 from api.routes.aws import router as aws_router
 
 from api.routes.analyse import router as analyse_router
@@ -70,7 +71,7 @@ app.include_router(aws_router, prefix="/api/v1/aws")
 @app.get("/health", tags=["ops"])
 async def health() -> dict:
     """Liveness probe for AWS ECS and load balancers."""
-    return {"status": "ok", "service": "mcp-investment-copilot"}
+    return {"status": "ok", "service": "Portfolio Copilot"}
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -86,3 +87,10 @@ async def root() -> dict:
             "docs":    "GET  /docs",
         },
     }
+
+
+# ── Lambda entry point ───────────────────────────────────────────────────────
+# Mangum adapts FastAPI's ASGI interface to API Gateway's Lambda event
+# format. `app` is still used directly for local dev (uvicorn), unaffected.
+# `handler` is what the actual AWS Lambda function points to in production.
+handler = Mangum(app)
