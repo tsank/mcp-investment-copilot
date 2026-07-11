@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 # Hardcoded in v1
 _HORIZON_DAYS   = 252
-_N_SIMULATIONS  = 10_000
+_N_SIMULATIONS  = 1_000
 _DISTRIBUTION   = "student_t"
 _RANDOM_SEED    = 42
 _REGIME_WARNING_THRESHOLD = 0.20   # 20% relative CVaR divergence
