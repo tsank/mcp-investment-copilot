@@ -36,6 +36,10 @@ load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+    force=True,  # Lambda's runtime pre-configures the root logger;
+                 # without force=True, basicConfig() is a silent no-op
+                 # and every logger.info() call across the orchestrator
+                 # gets filtered out, invisible in CloudWatch.
 )
 logger = logging.getLogger("api")
 
