@@ -60,7 +60,7 @@ from __future__ import annotations
 
 import logging
 
-from orchestrator.clients.mcp_client_factory import call_tool
+from servers.compliance.tools.check_compliance import check_compliance as _check_compliance_tool
 from orchestrator.state import (
     AgentState,
     ComplianceResult,
@@ -123,17 +123,16 @@ async def check_compliance(state: AgentState) -> dict:
 
     # ── Call compliance tool ──────────────────────────────────────────────────
     try:
-        data = await call_tool(
-            server_name="compliance",
-            tool_name="check_compliance",
-            arguments={
-                "weights":        state.portfolio.holdings,
-                "sector_map":     sector_map,
-                "var_95":         var_95,
-                "cvar_95":        cvar_95,
-                "rules_profile":  _RULES_PROFILE,
-                "rules_version":  _RULES_VERSION,
-            },
+        # Direct function call (v2 - Option B). No subprocess, no JSON round
+        # trip, no asyncio.to_thread() - rule evaluation against a YAML 
+        # ruleset is light, not CPU-heavy work worthy threading.
+        data = _check_compliance_tool(
+            weights=state.portfolio.holdings,
+            sector_map=sector_map,
+            var_95=var_95,
+            cvar_95=cvar_95,
+            rules_profile=_RULES_PROFILE,
+            rules_version=_RULES_VERSION,
         )
         logger.info(
             "check_compliance: ok — passed=%s violations=%d warnings=%d",
