@@ -1,0 +1,78 @@
+# infra/docker/Dockerfile.lambda
+#
+# Lambda container image for the Portfolio Copilot API.
+#
+# Different from v1's Dockerfile.api in a few important ways:
+#   - Base image: AWS's own Lambda Python base image (not plain python:slim)
+#     — includes the Lambda Runtime Interface Client, which is what lets
+#     the container receive and respond to Lambda invocations at all.
+#   - No CMD running a server (no uvicorn) — Lambda's runtime calls the
+#     handler function directly per-invocation. CMD points to the
+#     module.function path Lambda should call: api.main.handler
+#     (the Mangum-wrapped handler we just added).
+#   - Working directory convention: Lambda expects code under /var/task/
+#
+# Bundles the same application code as v1's Dockerfile.api:
+#   - api/            FastAPI app (entry point) — now with the Mangum handler
+#   - orchestrator/    LangGraph orchestration layer, now calling the 5
+#                       servers' tool functions directly (Option B) instead
+#                       of spawning subprocesses — no MCP subprocess spawn
+#                       needed inside Lambda at all
+#   - servers/         5 MCP servers' tools/ code (still present and
+#                       importable; server.py protocol wiring unused in
+#                       this deployment path but left intact)
+#   - data/fixtures/   CSV fixtures read by the market_data server (448K)
+#
+# Excluded:
+#   - .env             secrets come from AWS Secrets Manager at runtime,
+#                       same as v1
+#   - tests/, .git/, ui-react/, infra/
+#
+# Build and test locally using AWS's Lambda Runtime Interface Emulator
+# (bundled into the base image automatically):
+#   docker build -f infra/docker/Dockerfile.lambda -t portfolio-copilot-lambda:local .
+#   docker run --rm -p 9000:8080 --env-file .env portfolio-copilot-lambda:local
+#   curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" \
+#     -d '{"httpMethod": "GET", "path": "/health", "requestContext": {}}'
+
+FROM public.ecr.aws/lambda/python:3.10
+
+# Lambda's base image sets WORKDIR to /var/task already — code copied
+# here is what the runtime loads.
+
+# ── Install dependencies ─────────────────────────────────────────────────────
+# Same "install every service's requirements.txt into one environment"
+# approach as v1, since Option B means all 5 servers' tool functions
+# now run in-process inside this single Lambda container.
+COPY api/requirements.txt ./req-api.txt
+COPY orchestrator/requirements.txt ./req-orchestrator.txt
+COPY servers/market_data/requirements.txt ./req-market_data.txt
+COPY servers/risk_engine/requirements.txt ./req-risk_engine.txt
+COPY servers/portfolio_optimiser/requirements.txt ./req-portfolio_optimiser.txt
+COPY servers/scenario_simulation/requirements.txt ./req-scenario_simulation.txt
+COPY servers/compliance/requirements.txt ./req-compliance.txt
+
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    python -m pip install --no-cache-dir -r req-api.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-orchestrator.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-market_data.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-risk_engine.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-portfolio_optimiser.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-scenario_simulation.txt --target "${LAMBDA_TASK_ROOT}" && \
+    python -m pip install --no-cache-dir -r req-compliance.txt --target "${LAMBDA_TASK_ROOT}"
+
+# ── Copy application code ────────────────────────────────────────────────────
+# Same folder structure as the project root, since orchestrator's
+# imports (e.g. "from servers.risk_engine.tools.risk_metrics import ...")
+# are package-qualified from the root — this must be preserved exactly.
+COPY api/ ${LAMBDA_TASK_ROOT}/api/
+COPY orchestrator/ ${LAMBDA_TASK_ROOT}/orchestrator/
+COPY servers/ ${LAMBDA_TASK_ROOT}/servers/
+COPY data/fixtures/ ${LAMBDA_TASK_ROOT}/data/fixtures/
+
+# .env intentionally NOT copied — secrets injected via Lambda environment
+# variables sourced from Secrets Manager, configured at the function level.
+
+# Lambda calls this exact module.function path per invocation —
+# no server process running, no port, no CMD starting uvicorn.
+CMD ["api.main.handler"]
