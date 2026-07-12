@@ -28,17 +28,31 @@ All notable changes to Portfolio Copilot are documented here.
 
 ---
 
-## [v2] — In progress — Serverless re-platform
+## [v2] — 2026-07-12 — Serverless re-platform
 
-**Branch:** `v2-serverless`
+**Branch:** `v2-serverless`. Core infrastructure complete and verified end-to-end, including on iPhone.
 
-### Planned
-- Backend: AWS Lambda (FastAPI via Mangum) + API Gateway, replacing ECS Fargate
-- Frontend: S3 + CloudFront, replacing the Fargate UI container and nginx
-- MCP servers refactored from subprocess-spawned to direct in-process function calls in the orchestrator (Option B — see `ARCHITECTURE.md`), for lower Lambda cold-start latency
-- Permanent, stable URL — removes the v1 IP-churn limitation entirely
-- Target cost: ~$0.31–0.35/month, down from v1's $0.75–4/month depending on usage
-- PWA support (manifest, icons, service worker) as a tail-end addition once the core migration is verified
+### Added
+- Backend: AWS Lambda (container image, ARM64/Graviton2, 1024MB, 120s timeout) + API Gateway, replacing ECS Fargate — permanent URL `https://701eexyejj.execute-api.ap-south-1.amazonaws.com`
+- Frontend: S3 + CloudFront, replacing the Fargate UI container and nginx — permanent HTTPS URL `https://d2jlcue9iriq3l.cloudfront.net`
+- MCP servers refactored from subprocess-spawned to direct in-process function calls in the orchestrator (Option B), for lower Lambda cold-start latency
+- PWA support: `manifest.json` (Portfolio Copilot branding, dark navy theme), iOS-specific meta tags, custom amber lightning-bolt icon set. Installable via "Add to Home Screen" (iPhone Safari) and "Add to Dock" (macOS Safari)
+- Removes v1's IP-churn limitation entirely — both frontend and backend URLs are now permanent across redeployments
+
+### Fixed
+- Docker's default buildx output includes an attestation/SBOM manifest that Lambda's container image support rejects outright — fixed by building with `--provenance=false --sbom=false`
+- `logging.basicConfig()` is a silent no-op on Lambda (runtime pre-configures the root logger) — fixed with `force=True`; this was the precondition for diagnosing the bug below, since it had made every `logger.info()` call invisible in CloudWatch
+- Scenario simulation node taking ~30s/call (~60s per full pipeline run): diagnosed as a single-threaded, unvectorised 10,000-simulation × 252-day for-loop in `run_garch_simulation`, not a Lambda resource constraint (confirmed by doubling Lambda memory/vCPU with no effect). Pragmatic fix: reduced simulation count 10,000 → 1,000 (pipeline now ~17–26s, demo-viable). Proper numpy vectorisation deliberately deferred to v3 — out of v2's infra-only scope
+- iOS Safari blocks/restricts plain HTTP more aggressively than desktop browsers — the S3 HTTP-only website endpoint worked on desktop but failed on iPhone Safari; resolved by requiring the CloudFront HTTPS URL
+
+### Removed
+- Dead ECS start/stop controls from the UI header — Lambda has no "running/stopped" state to toggle, the concept doesn't map onto serverless
+
+### Kept (deliberate)
+- v1's Fargate-specific files (Dockerfiles, ECS task definitions, `api/routes/aws.py`) remain visible in the repo on `main` rather than being deleted at merge time, alongside the `v1-fargate` tag — shows both deployment approaches as a single, still-real portfolio signal
+
+### Cost
+- Target ~$0.31–0.35/month at typical demo-driven usage, down from v1's $0.75–4/month depending on hours run. Real-usage check-in still pending.
 
 ---
 

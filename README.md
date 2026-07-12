@@ -4,6 +4,8 @@
 
 Portfolio Copilot takes a natural-language investment query and a set of portfolio holdings, then runs a full multi-agent analysis pipeline — market data retrieval, risk computation, portfolio optimisation, Monte Carlo/GARCH scenario simulation, and compliance checking — before synthesising everything into a single AI-generated recommendation.
 
+**🔗 Live app:** [d2jlcue9iriq3l.cloudfront.net](https://d2jlcue9iriq3l.cloudfront.net) · **API:** [701eexyejj.execute-api.ap-south-1.amazonaws.com](https://701eexyejj.execute-api.ap-south-1.amazonaws.com) · Installable as a PWA on iOS and macOS ("Add to Home Screen" / "Add to Dock")
+
 ---
 
 ## What it does
@@ -30,16 +32,23 @@ All of this is visible in a 7-tab dashboard: **My Portfolio**, **AI Recommendati
 ## Architecture
 
 ```
-React UI  →  FastAPI  →  LangGraph Orchestrator (7 nodes)  →  5 MCP Servers
-                                                                  ├── Market Data
-                                                                  ├── Risk Engine
-                                                                  ├── Portfolio Optimiser
-                                                                  ├── Scenario Simulation
-                                                                  └── Compliance
-                              LangGraph also calls → OpenAI (GPT-4o) for final synthesis
+React UI  →  FastAPI (on Lambda)  →  LangGraph Orchestrator (7 nodes)  →  5 MCP Servers
+                                                                            ├── Market Data
+                                                                            ├── Risk Engine
+                                                                            ├── Portfolio Optimiser
+                                                                            ├── Scenario Simulation
+                                                                            └── Compliance
+                                        LangGraph also calls → OpenAI (GPT-4o) for final synthesis
 ```
 
-Each of the 5 MCP servers is a genuine, independent [Model Context Protocol](https://modelcontextprotocol.io/) server, spoken to over stdio transport — not a set of local function calls dressed up as "agents." The LangGraph orchestrator coordinates calls across all five, handles the data flow between them, and hands the aggregated result to an LLM for the final narrative synthesis.
+Each of the 5 MCP servers is a genuine, independent [Model Context Protocol](https://modelcontextprotocol.io/) server — not a set of local function calls dressed up as "agents." The LangGraph orchestrator coordinates calls across all five, handles the data flow between them, and hands the aggregated result to an LLM for the final narrative synthesis.
+
+**Two deployment generations, same orchestration core**, kept side by side in this repo on purpose (see [Deployment history](#deployment-history) below):
+
+- **v1 — AWS ECS Fargate**, MCP servers spawned as stdio subprocesses. Tagged [`v1-fargate`](../../tree/v1-fargate).
+- **v2 — AWS Lambda + API Gateway + S3/CloudFront** (current), MCP servers called as direct in-process functions for Lambda-friendly cold starts.
+
+Full request-lifecycle and deployment detail is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### Why MCP?
 
@@ -51,15 +60,16 @@ Splitting the domain logic into standalone MCP servers (rather than one monolith
 
 | Layer | Technology |
 |---|---|
-| Frontend | React, Plotly.js, Axios |
-| Backend API | FastAPI, Uvicorn |
+| Frontend | React, Plotly.js, Axios, installable PWA |
+| Backend API | FastAPI (Mangum adapter on Lambda) |
 | Orchestration | LangGraph |
-| Agent protocol | Model Context Protocol (MCP), stdio transport |
+| Agent protocol | Model Context Protocol (MCP) — direct in-process calls in v2, stdio subprocesses in v1 |
 | LLM | OpenAI GPT-4o |
 | Risk modelling | `arch` (GARCH), `scipy`, `numpy`, `pandas` |
 | Optimisation | `scipy` (SLSQP solver) |
-| Market data | `yfinance` (CSV fixtures in v1; live data planned for v2/v3) |
-| Deployment | AWS ECS Fargate, ECR, Secrets Manager, CloudWatch |
+| Market data | `yfinance` (CSV fixtures in v1/v2; live data planned for v3) |
+| Deployment (v2, current) | AWS Lambda (ARM64/Graviton2), API Gateway, S3, CloudFront |
+| Deployment (v1, previous) | AWS ECS Fargate, ECR, Secrets Manager, CloudWatch |
 
 ---
 
@@ -93,26 +103,42 @@ Visit `http://localhost:3000`.
 
 ---
 
-## AWS deployment
+## AWS deployment (v2, current)
 
-Portfolio Copilot is deployed on **AWS ECS Fargate** (region: `ap-south-1`), with:
+Portfolio Copilot runs entirely serverless in `ap-south-1`:
 
-- Two Fargate services (API, UI), 0.5 vCPU / 1GB each
-- Images built for `linux/amd64` and pushed to **ECR**
-- The OpenAI API key stored in **AWS Secrets Manager**, injected into the container at runtime
-- **CloudWatch Logs** for both services
-- A minimal IAM setup: an ECS task execution role scoped to ECR pull, Secrets Manager read, and CloudWatch log write
+- **Backend** — AWS Lambda (container image, **ARM64/Graviton2**, 1024MB, 120s timeout) behind **API Gateway** (HTTP API), giving a permanent URL that never changes across redeployments. FastAPI is wrapped for Lambda via the **Mangum** adapter.
+- **Frontend** — **S3** static hosting behind **CloudFront**, which provides free HTTPS via an ACM certificate with no custom domain required.
+- **MCP servers** — all 5 servers were refactored from subprocess-spawned (v1's model) to **direct in-process function calls**, trading away process isolation for materially lower Lambda cold-start latency.
+- **Secrets** — the OpenAI API key lives in Secrets Manager and is set as a Lambda environment variable at configuration time.
 
-**Known v1 limitation:** there is no Application Load Balancer in front of the Fargate services. Each service is reachable via a direct public IP, which **changes every time the service restarts**. This is a deliberate cost trade-off — an ALB running continuously costs roughly $18–20/month regardless of usage, while direct Fargate IPs cost only for the hours actually running (typically under $2/month for occasional use). The trade-off is a manual redeploy step (rebuilding the frontend with the new backend IP) after each restart. v2 replaces this entirely with AWS Lambda + API Gateway, which provides a permanent URL at near-zero idle cost.
+Full resource IDs and redeployment commands: [`infra/LAMBDA_DEPLOYMENT.md`](infra/LAMBDA_DEPLOYMENT.md), [`infra/FRONTEND_DEPLOYMENT.md`](infra/FRONTEND_DEPLOYMENT.md).
 
-A live demo is available on request.
+**Target cost:** ~$0.31–0.35/month at typical demo-driven usage — down from v1's $0.75–4/month, and without v1's IP-churn limitation (see below).
+
+### Debugging notes worth knowing about
+
+A few real issues came up building this that are worth flagging, since they're the kind of thing that only shows up once you actually deploy rather than just design on paper:
+
+- **ARM64/Graviton2 for the Lambda function.** Unlike ECS Fargate in this region (which required `linux/amd64` images for v1), Lambda's container image support runs ARM64/Graviton2 natively — cheaper per millisecond of compute and no architecture mismatch to work around on an Apple Silicon dev machine.
+- **Docker's attestation manifest breaks Lambda deploys.** Buildx's default output includes an attestation/SBOM manifest that Lambda's container image support rejects outright (`InvalidParameterValueException: image manifest ... is not supported`). Every build needs `--provenance=false --sbom=false` explicitly.
+- **`logging.basicConfig()` is a silent no-op on Lambda.** Lambda's Python runtime pre-configures the root logger before application code runs, so a plain `basicConfig()` call does nothing — per Python's own documented behaviour, but easy to miss. Every `logger.info()` in the orchestrator was invisible in CloudWatch until this was set with `force=True`, which is what actually made the next bug diagnosable.
+- **The real GARCH bottleneck wasn't infra — it was an unvectorised loop.** The scenario simulation node was taking ~30s per call (~60s for a full current + optimal-weights run). Doubling Lambda memory (and the vCPUs that come with it) had no effect, which confirmed the bottleneck was single-threaded Python, not available compute — a nested 10,000-simulation × 252-day for-loop in `run_garch_simulation`, never vectorised. The pragmatic v2 fix was reducing simulation count 10,000 → 1,000 (real pipeline time now ~17–26s, demo-viable); a proper numpy-vectorised rewrite is deliberately deferred to v3, since v2's scope was infra only, not modeling changes.
+- **iOS Safari enforces HTTPS more strictly than desktop browsers.** The S3 website endpoint (plain HTTP) loaded fine on desktop Chrome and Safari but failed on iPhone Safari specifically. This is what made CloudFront's HTTPS a genuine functional requirement for the stated goal of a working iPhone demo, not just a nice-to-have.
+
+## Deployment history
+
+### v1 — AWS ECS Fargate (previous, still in the repo)
+
+The original deployment — two ECS Fargate services (API, UI), Docker images on ECR, secrets via Secrets Manager, logs via CloudWatch. Fully preserved and runnable via `git checkout v1-fargate`; the Dockerfiles and ECS task definitions are also kept visible on `main` (`infra/docker/Dockerfile.api`, `infra/docker/Dockerfile.ui`, `infra/ecs/task_definitions/`) rather than deleted, as a second, still-real deployment path alongside v2.
+
+**Known v1 limitation (resolved in v2):** no Application Load Balancer — each Fargate service got a new public IP on every restart, requiring the frontend to be rebuilt with the updated backend IP. A deliberate cost trade-off at the time (an always-on ALB runs ~$18–20/month regardless of usage); v2's Lambda + API Gateway gives a permanent URL at near-zero idle cost instead.
 
 ---
 
 ## Roadmap
 
-- **v2** — serverless re-platform: AWS Lambda (FastAPI via Mangum) + API Gateway, S3 + CloudFront for the frontend. Removes the IP-churn limitation above; targets near-zero idle cost.
-- **v3** — sector-wide symbol universe, buy/sell-new-ticker suggestions (not just reweighting held positions), a Differential Evolution solver for the larger search space, live market data, and compliance rules extended to proposed tickers.
+- **v3** (next, after Document Intelligence project) — sector-wide symbol universe, buy/sell-new-ticker suggestions (not just reweighting held positions), a Differential Evolution solver for the larger search space, live market data, compliance rules extended to proposed tickers, and the deferred GARCH vectorisation fix noted above. Deliberately sequenced after infra (v2) so modeling risk and infra risk stay isolated from each other.
 
 ---
 
@@ -120,19 +146,25 @@ A live demo is available on request.
 
 ```
 .
-├── api/                    FastAPI application
-├── orchestrator/           LangGraph orchestration layer
-├── servers/                5 independent MCP servers
+├── api/                          FastAPI application
+├── orchestrator/                 LangGraph orchestration layer
+├── servers/                      5 independent MCP servers
 │   ├── market_data/
 │   ├── risk_engine/
 │   ├── portfolio_optimiser/
 │   ├── scenario_simulation/
 │   └── compliance/
-├── ui-react/                React frontend
-├── data/fixtures/          Sample NSE price data (v1)
+├── ui-react/                     React frontend (PWA-enabled)
+├── data/fixtures/                Sample NSE price data
 └── infra/
-    ├── docker/              Dockerfiles for API and UI
-    └── ecs/                 ECS task definitions
+    ├── docker/
+    │   ├── Dockerfile.api         v1 — Fargate API image
+    │   ├── Dockerfile.ui          v1 — Fargate UI image
+    │   └── Dockerfile.lambda      v2 — Lambda container image
+    ├── ecs/task_definitions/     v1 — ECS task definitions
+    ├── s3/bucket-policy.json     v2 — frontend bucket policy
+    ├── LAMBDA_DEPLOYMENT.md      v2 — backend deployment reference
+    └── FRONTEND_DEPLOYMENT.md    v2 — frontend deployment reference
 ```
 
 ---
