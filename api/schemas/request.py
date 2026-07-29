@@ -19,6 +19,27 @@ from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# v3 guardrail: known-symbol allowlist.
+#
+# Fails a request at the API boundary with a clear 422 if an unknown
+# ticker is submitted, instead of letting it fall through to
+# Market Data's _load_fixture(), which previously raised a raw
+# FileNotFoundError (exposing an internal fixture file path) that the
+# /analyse route's generic exception handler turned into an opaque 500.
+#
+# Mirrors the NSE large-cap symbols available in data/fixtures/.
+# Expected to widen in v4 alongside the live-data ticker universe —
+# not hardcoded logic, just today's known-good set.
+KNOWN_SYMBOLS: frozenset[str] = frozenset({
+    "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
+    "SBIN.NS", "BHARTIARTL.NS", "LT.NS", "BAJFINANCE.NS", "ADANIENT.NS",
+})
+
+# v3 guardrail: request complexity cap.
+# Bounds Lambda duration/cost — each additional symbol adds a GARCH
+# simulation pass and an optimisation dimension, both real per-request cost.
+MAX_HOLDINGS = 15
+
 
 class PortfolioRequest(BaseModel):
     """
@@ -47,6 +68,28 @@ class PortfolioRequest(BaseModel):
     def holdings_not_empty(cls, v: dict) -> dict:
         if not v:
             raise ValueError("holdings must contain at least one symbol")
+        return v
+
+    @field_validator("holdings")
+    @classmethod
+    def holdings_within_complexity_cap(cls, v: dict) -> dict:
+        if len(v) > MAX_HOLDINGS:
+            raise ValueError(
+                f"Portfolio has {len(v)} symbols; maximum supported is "
+                f"{MAX_HOLDINGS}. Reduce the number of holdings before "
+                f"submitting."
+            )
+        return v
+
+    @field_validator("holdings")
+    @classmethod
+    def holdings_are_known_symbols(cls, v: dict) -> dict:
+        unknown = sorted(set(v.keys()) - KNOWN_SYMBOLS)
+        if unknown:
+            raise ValueError(
+                f"Unrecognised symbol(s): {', '.join(unknown)}. "
+                f"Supported symbols: {', '.join(sorted(KNOWN_SYMBOLS))}."
+            )
         return v
 
     @model_validator(mode="after")
