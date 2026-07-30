@@ -14,7 +14,9 @@ Graph topology:
 
     START
       → parse_query
-      → fetch_market_data
+      → [route_after_parse]
+            "out_of_scope" → END (v3 guardrail - skips the entire pipeline)
+            (everything else) → fetch_market_data
       → compute_risk
       → [route_after_risk]
             "risk"         → check_compliance
@@ -25,6 +27,8 @@ Graph topology:
       → END
 
 All four paths converge at check_compliance → synthesise → END.
+The out-of-scope path bypasses everything and ends immediately after
+parse_query, which populates final_recommendation directly.
 
 Design decisions:
 
@@ -73,7 +77,33 @@ from orchestrator.nodes.synthesise import synthesise
 logger = logging.getLogger(__name__)
 
 
-# ── Conditional edge function ─────────────────────────────────────────────────
+# ── Conditional edge function (after parse_query) ─────────────────────────────────────────────────
+
+def route_after_parse(state: AgentState) -> str:
+    """
+    Conditional edge - called after parse_query node completes.
+
+    v3 guardrail - reaches OUT_OF_SCOPE straight to END, before any market
+    data, risk, optimisation, simulation, or compliance call - and before
+    the synthesise LLM call. parse_query has already populated final_recommendation
+    directly for this path (see parse_query.py).
+
+    Every other analysis_type proceeds to fetch_market_data as before.
+
+    Args:
+        state: Current AgentState after parse_query has written 
+        analysis_type (and, for OUT_OF_SCOPE, final_recommendation).
+
+    Returns:
+        str - name of the next node ("fetch_market_data" or "END").
+    """
+    if state.analysis_type == AnalysisType.OUT_OF_SCOPE:
+        logger.info("route_after_parse: out_of_scope - short-circuiting to END")
+        return "END"
+    return "fetch_market_data"
+
+
+# ── Conditional edge function (after compute_risk) ─────────────────────────────────────────────────
 
 def route_after_risk(state: AgentState) -> str:
     """
@@ -143,8 +173,17 @@ def build_graph(use_checkpointer: bool = False) -> StateGraph:
     # ── Entry point ───────────────────────────────────────────────────────────
     graph.add_edge(START, "parse_query")
 
+    # ── Conditional edge after parse_query (v3 guardrail) ─────────────────────
+    graph.add_conditional_edges(
+        "parse_query",
+        route_after_parse,
+        {
+            "fetch_market_data": "fetch_market_data",
+            "END":               END,
+        },
+    )
+
     # ── Fixed edges ───────────────────────────────────────────────────────────
-    graph.add_edge("parse_query",       "fetch_market_data")
     graph.add_edge("fetch_market_data", "compute_risk")
 
     # ── Conditional edge after compute_risk ───────────────────────────────────

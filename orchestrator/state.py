@@ -37,11 +37,15 @@ class AnalysisType(str, Enum):
     SIMULATION:     fetch_market_data → compute_risk → simulate → check_compliance → synthesise
     FULL:           fetch_market_data → compute_risk → optimise + simulate (parallel)
                     → check_compliance → synthesise
+    OUT_OF_SCOPE:   END (v3 guardrail - short-circuits immediately after parse_query, before any
+                    market data, risk, or LLM synthesis call. parse_query populates final_recommendation
+                    directly with a clear scope message.)
     """
     RISK         = "risk"
     OPTIMISATION = "optimisation"
     SIMULATION   = "simulation"
     FULL         = "full"
+    OUT_OF_SCOPE = "out_of_scope"
 
 
 # ── Input Models ──────────────────────────────────────────────────────────────
