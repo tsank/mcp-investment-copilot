@@ -1,13 +1,13 @@
 """
 orchestrator/nodes/synthesise.py
-
+ 
 Node 7 of 7 — synthesise
-
+ 
 Responsibility:
     Generate a structured natural language investment recommendation
     grounded in all computed results in AgentState. Single GPT-4o call
     (Option A synthesis — v1 decision).
-
+ 
 Reads from AgentState:
     - query               (str)
     - portfolio           (Portfolio)
@@ -20,47 +20,47 @@ Reads from AgentState:
     - simulation_result   (SimulationResult)   — may be None
     - compliance_result   (ComplianceResult)   — may be None
     - errors              (list[str])
-
+ 
 Writes to AgentState:
     - final_recommendation (str) — structured recommendation prose
-
+ 
 Design decisions:
-
+ 
     Option A — single prompt (v1):
         All result fields serialised into one structured prompt.
         One GPT-4o call produces final_recommendation.
         Option B (section-by-section, 4 LLM calls) deferred to v2
         when the React dashboard needs per-tab summaries.
-
+ 
     GPT-4o (not mini):
         synthesise is a generation task — interpreting numbers, forming
         judgements, writing clear prose. GPT-4o-mini is for classification
         (parse_query). GPT-4o is for generation (synthesise).
-
+ 
     Partial results handled gracefully:
         Each section of the prompt is only included if the corresponding
         AgentState field is not None. If compliance_result is None,
         the compliance section is omitted. The LLM is instructed to
         note when data is unavailable rather than hallucinate.
-
+ 
     Compliance gate surfaced explicitly:
         If compliance_result.passed is False, the recommendation opens
         with a hard warning before any other content. Hard violations
         are never buried in the middle of the response.
-
+ 
     regime_warning surfaced explicitly:
         If simulation_result.regime_warning is True, the recommendation
         includes a volatility regime warning prominently.
-
+ 
     Errors surfaced:
         If state.errors is non-empty, the recommendation notes that
         some computations failed and results may be partial.
-
+ 
     Temperature 0.3:
         Slightly above zero to allow natural prose variation while
         keeping the recommendation factually grounded. Not 0 because
         financial prose at temperature 0 tends to be repetitive.
-
+ 
     Output format:
         The LLM is instructed to produce structured sections:
             1. Compliance Status
@@ -70,25 +70,25 @@ Design decisions:
             5. Recommendation
         Plain prose — no markdown headers in v1 (Gradio renders plain text).
 """
-
+ 
 from __future__ import annotations
-
+ 
 import json
 import logging
-
+ 
 from openai import AsyncOpenAI
-
+ 
 from orchestrator.state import AgentState
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
 _openai = AsyncOpenAI()
-
+ 
 _SYSTEM_PROMPT = """You are a senior portfolio analyst for Indian equity markets.
-
+ 
 You will receive computed quantitative results for a portfolio analysis request.
 Generate a structured investment recommendation grounded strictly in the provided data.
-
+ 
 Rules:
 - Never hallucinate numbers. Only reference figures explicitly provided.
 - If a section's data is marked UNAVAILABLE, note this briefly and move on.
@@ -100,26 +100,82 @@ Rules:
     COMPLIANCE STATUS, RISK ASSESSMENT, PORTFOLIO OPTIMISATION, SCENARIO ANALYSIS, RECOMMENDATION
 - Keep total response under 500 words.
 - All monetary values are in INR. All returns are annualised unless stated otherwise."""
-
-
+ 
+ 
+# ── v3 guardrail: compliance cross-check ───────────────────────────────────────
+#
+# The LLM is instructed (system prompt) to open with COMPLIANCE STATUS and
+# state hard violations prominently — but that instruction has no code-level
+# guarantee behind it. An LLM call can, on any given invocation, soften,
+# bury, or omit a breach even when the compliance data was correctly passed
+# in. For a financial recommendation, that's the one failure mode that
+# actually matters: not "unhelpful," but "actively wrong."
+#
+# Fix: when compliance_result.passed is False, a deterministic, non-LLM
+# alert is ALWAYS prepended — plain string construction from structured
+# violation data, independent of what the model did or didn't say. This
+# applies on both the success and the LLM-call-failure fallback path,
+# since a breach existing is exactly the moment safety information matters
+# most, not less.
+#
+# A lightweight secondary check (_recommendation_mentions_violations) scans
+# the LLM's own text for the violated rule_id strings, purely for
+# observability — it never blocks or edits the response, it only logs and
+# records an error entry if the model silently dropped a violation, so this
+# is traceable rather than invisible.
+ 
+def _build_compliance_alert(compliance_result) -> str:
+    """
+    Deterministically construct a compliance breach alert from structured
+    violation data. No LLM involved — this text is guaranteed correct by
+    construction and guaranteed to appear whenever compliance_result.passed
+    is False, regardless of what synthesise's own LLM call produces.
+    """
+    lines = ["⚠️ SYSTEM COMPLIANCE ALERT — this portfolio fails one or more hard rules:"]
+    for v in compliance_result.violations:
+        lines.append(
+            f"  • {v.rule_id} ({v.severity}): value={v.value:.3f}, "
+            f"limit={v.limit:.3f} — {v.description}"
+        )
+    lines.append(
+        "Any recommendation below must be read in light of this breach; "
+        "it does not override or resolve it."
+    )
+    return "\n".join(lines)
+ 
+ 
+def _recommendation_mentions_violations(recommendation: str, compliance_result) -> bool:
+    """
+    Observability check only — never blocks or edits the response.
+ 
+    Returns True if the LLM's own prose referenced at least one violated
+    rule_id. False is logged and recorded in state.errors as a signal that
+    the model didn't follow the system prompt's instruction on this call —
+    useful for noticing drift over time, not something the user needs to
+    see (the deterministic alert already guarantees they see the breach).
+    """
+    text_upper = recommendation.upper()
+    return any(v.rule_id.upper() in text_upper for v in compliance_result.violations)
+ 
+ 
 async def synthesise(state: AgentState) -> dict:
     """
     LangGraph node — synthesise.
-
+ 
     Serialises all AgentState result fields into a structured prompt
     and calls GPT-4o to generate the final investment recommendation.
-
+ 
     Args:
         state: Current AgentState. Reads all result fields.
-
+ 
     Returns:
         dict with keys: final_recommendation, execution_trace, errors.
     """
     logger.info("synthesise: starting — analysis_type=%s", state.analysis_type.value)
-
+ 
     prompt = _build_prompt(state)
     logger.info("synthesise: prompt length=%d chars", len(prompt))
-
+ 
     try:
         response = await _openai.chat.completions.create(
             model="gpt-4o",
@@ -130,14 +186,14 @@ async def synthesise(state: AgentState) -> dict:
                 {"role": "user",   "content": prompt},
             ],
         )
-
+ 
         recommendation = response.choices[0].message.content.strip()
         logger.info(
             "synthesise: ok — %d chars, %d tokens used",
             len(recommendation),
             response.usage.total_tokens,
         )
-
+ 
     except Exception as exc:
         logger.error("synthesise: LLM call failed — %s", exc)
         fallback = (
@@ -145,31 +201,54 @@ async def synthesise(state: AgentState) -> dict:
             f"Unable to generate recommendation due to: {exc}. "
             f"Errors encountered: {'; '.join(state.errors) if state.errors else 'none'}."
         )
+        errors_out = state.errors + [f"synthesise: {exc}"]
+ 
+        # v3 guardrail: a breach existing is exactly when this matters most —
+        # apply the same deterministic alert even on the failure path.
+        if state.compliance_result is not None and not state.compliance_result.passed:
+            fallback = _build_compliance_alert(state.compliance_result) + "\n\n" + fallback
+ 
         return {
             "final_recommendation": fallback,
             "execution_trace":      state.execution_trace + ["synthesise:error"],
-            "errors":               state.errors + [f"synthesise: {exc}"],
+            "errors":               errors_out,
         }
-
+ 
+    errors_out = list(state.errors)
+ 
+    # v3 guardrail: compliance cross-check.
+    if state.compliance_result is not None and not state.compliance_result.passed:
+        if not _recommendation_mentions_violations(recommendation, state.compliance_result):
+            logger.warning(
+                "synthesise: LLM recommendation did not reference the "
+                "compliance violation(s) — deterministic alert prepended "
+                "as the safety net regardless."
+            )
+            errors_out.append(
+                "synthesise: LLM recommendation did not explicitly mention "
+                "the compliance violation — see prepended system alert"
+            )
+        recommendation = _build_compliance_alert(state.compliance_result) + "\n\n" + recommendation
+ 
     return {
         "final_recommendation": recommendation,
         "execution_trace":      state.execution_trace + ["synthesise:ok"],
-        "errors":               state.errors,
+        "errors":               errors_out,
     }
-
-
+ 
+ 
 # ── Prompt builder ────────────────────────────────────────────────────────────
-
+ 
 def _build_prompt(state: AgentState) -> str:
     """
     Serialise all AgentState result fields into a structured prompt.
-
+ 
     Each section is only included if the corresponding field is not None.
     Fields that are None are noted as UNAVAILABLE so the LLM does not
     attempt to reference them.
     """
     sections: list[str] = []
-
+ 
     # ── Query context ─────────────────────────────────────────────────────────
     sections.append(f"USER QUERY: {state.query}")
     sections.append(f"ANALYSIS TYPE: {state.analysis_type.value.upper()}")
@@ -177,7 +256,7 @@ def _build_prompt(state: AgentState) -> str:
         f"PORTFOLIO: {json.dumps(state.portfolio.holdings)} "
         f"| Total value: INR {state.portfolio.total_value:,.0f}"
     )
-
+ 
     # ── Compliance ────────────────────────────────────────────────────────────
     if state.compliance_result is not None:
         cr = state.compliance_result
@@ -197,7 +276,7 @@ def _build_prompt(state: AgentState) -> str:
         )
     else:
         sections.append("COMPLIANCE: UNAVAILABLE")
-
+ 
     # ── Risk metrics ──────────────────────────────────────────────────────────
     if state.risk_metrics is not None:
         rm = state.risk_metrics
@@ -213,7 +292,7 @@ def _build_prompt(state: AgentState) -> str:
         sections.append(f"ASSET VOLATILITIES (annualised): {vol_str}")
     else:
         sections.append("RISK METRICS: UNAVAILABLE")
-
+ 
     # ── GARCH ─────────────────────────────────────────────────────────────────
     if state.garch_result is not None:
         gr = state.garch_result
@@ -231,7 +310,7 @@ def _build_prompt(state: AgentState) -> str:
         )
     else:
         sections.append("GARCH FORECAST: UNAVAILABLE")
-
+ 
     # ── Optimisation ──────────────────────────────────────────────────────────
     if state.optimisation_result is not None:
         opt = state.optimisation_result
@@ -253,12 +332,12 @@ def _build_prompt(state: AgentState) -> str:
         sections.append(f"WEIGHT DELTA (optimal - current): {json.dumps(delta)}")
     else:
         sections.append("OPTIMISATION: UNAVAILABLE")
-
+ 
     # ── Simulation ────────────────────────────────────────────────────────────
     if state.simulation_result is not None:
         sr = state.simulation_result
         sections.append(f"REGIME WARNING: {sr.regime_warning}")
-
+ 
         def sim_str(label: str, s) -> str:
             if s is None:
                 return f"{label}: UNAVAILABLE"
@@ -268,16 +347,16 @@ def _build_prompt(state: AgentState) -> str:
                 f"VaR_95={s.var_95:.4f} | "
                 f"p10={s.percentiles.p10:.4f} p50={s.percentiles.p50:.4f} p90={s.percentiles.p90:.4f}"
             )
-
+ 
         sections.append(sim_str("MONTE CARLO (current weights)", sr.monte_carlo))
         sections.append(sim_str("MONTE CARLO (optimal weights)", sr.monte_carlo_optimal))
         sections.append(sim_str("GARCH SIM (current weights)", sr.garch_sim))
         sections.append(sim_str("GARCH SIM (optimal weights)", sr.garch_sim_optimal))
     else:
         sections.append("SIMULATION: UNAVAILABLE")
-
+ 
     # ── Errors ────────────────────────────────────────────────────────────────
     if state.errors:
         sections.append(f"COMPUTATION ERRORS: {'; '.join(state.errors)}")
-
+ 
     return "\n\n".join(sections)
