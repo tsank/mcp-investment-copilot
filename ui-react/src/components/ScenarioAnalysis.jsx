@@ -70,6 +70,19 @@ const styles = {
     fontSize:        "0.85rem",
     fontFamily:      "IBM Plex Mono, monospace",
   },
+  partialOptimalData: {
+    display:         "flex",
+    alignItems:      "center",
+    gap:             "10px",
+    padding:         "10px 16px",
+    backgroundColor: C.blue + "18",
+    border:          `1px solid ${C.blue}44`,
+    borderRadius:    "8px",
+    marginBottom:    "16px",
+    color:           C.blue,
+    fontSize:        "0.85rem",
+    fontFamily:      "IBM Plex Mono, monospace",   
+  }
 };
 
 // ── Fan chart builder ──────────────────────────────────────────────────────────
@@ -161,6 +174,9 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
   const garch_sim           = simulation?.garch_sim           || null;
   const garch_sim_optimal   = simulation?.garch_sim_optimal   || null;
   const regime_warning      = simulation?.regime_warning      || false;
+
+  const hasPartialOptimalData =
+    (monte_carlo || garch_sim) && !monte_carlo_optimal && !garch_sim_optimal;
 
   // ── Fan chart data ─────────────────────────────────────────────────────────
   // useMemo MUST be before any early return — React hooks rules.
@@ -327,6 +343,15 @@ export default function ScenarioAnalysis({ simulation, totalValue, loading }) {
 
   return (
     <div style={styles.container}>
+      {/* Partial-data note — SIMULATION-only queries skip optimise, so no
+          optimal-weights comparison is available (v3 guardrail) */}
+      {hasPartialOptimalData && (
+        <div style={styles.partialOptimalData}>
+          ℹ️ Showing current-weight simulation only — this analysis didn't
+          include portfolio optimisation, so there's no optimal-weight
+          comparison. Run a FULL or OPTIMISATION analysis to see both.
+        </div>
+      )}
 
       {/* Regime warning banner */}
       {regime_warning && (
