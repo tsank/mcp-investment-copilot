@@ -1,4 +1,3 @@
-# Test synthesise · PY
 """
 orchestrator/tests/test_synthesise.py
  
