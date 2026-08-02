@@ -9,4 +9,5 @@ dist/
 build/
 .venv/
 response*.json
-scripts/eval_results/ # ignore run artifacts
+scripts/eval_results/
+scripts/eval_results/
