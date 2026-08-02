@@ -2,6 +2,8 @@
 
 This document describes Portfolio Copilot's system design: how a request flows through the system, why it's built as five independent MCP servers rather than one backend, and how the current deployment (v2, serverless) differs from the previous one (v1, ECS Fargate) — which is kept in the repo alongside v2 rather than removed.
 
+For what each node actually computes — the formulas, the models, and their honest limitations — see [`COMPUTATIONS.md`](COMPUTATIONS.md). This document is about data flow and system wiring; that one is about method.
+
 ---
 
 ## System overview (v2 — current, serverless)
@@ -71,14 +73,57 @@ The biggest structural change from v1: all 5 MCP servers are now called as **dir
 |---|---|---|
 | `parse_query` | OpenAI | Classify the analysis type requested from the natural-language query |
 | `fetch_market_data` | Market Data (in-process) | Retrieve historical prices for held symbols |
-| `compute_risk` | Risk Engine (in-process) | Volatility, Sharpe, VaR/CVaR, drawdown, GARCH(1,1)-t forecast |
-| `optimise` | Portfolio Optimiser (in-process) | SLSQP mean-variance optimisation, efficient frontier |
+| `compute_risk` | Risk Engine (in-process) | Volatility, Sharpe, VaR/CVaR, drawdown, GARCH(1,1)-t forecast, rolling risk evolution (current weights) |
+| `optimise` | Portfolio Optimiser (in-process) | SLSQP mean-variance optimisation, efficient frontier, rolling risk evolution (optimal weights) |
 | `simulate` | Scenario Simulation (in-process) | Monte Carlo + GARCH-based 1-year forward paths |
 | `check_compliance` | Compliance (in-process) | Evaluate portfolio against a configurable YAML ruleset |
 | `synthesise` | OpenAI | Combine all outputs into one coherent recommendation |
 
 5. Each node's output accumulates into shared LangGraph state, visible to later nodes and returned in full to the client (including a step-by-step execution trace)
 6. **React UI**, served from CloudFront, renders the aggregated result across 7 tabs, each independently able to render before or without the others (empty states shown until data arrives)
+
+---
+
+## Data flow notes
+
+Two pieces of data flow are worth calling out explicitly, since they're not obvious from the node table above and both came from the same underlying discipline: keep chart/UI-feeding computations non-fatal, and never let a display concern silently corrupt or bypass a compliance-relevant one.
+
+### Rolling risk evolution — split across two nodes, not computed once
+
+The Risk tab's rolling CVaR/volatility chart shows both the **current** portfolio and the **optimal** portfolio's risk evolution over time. These two series are deliberately computed in two different nodes rather than one, because the data each needs becomes available at different points in the pipeline:
+
+- **`compute_risk`** computes the rolling series for **current weights** — it already has `portfolio.holdings` and `market_data.log_returns` at that point, so this runs on every risk analysis.
+- **`optimise`** computes the rolling series for **optimal weights** — `optimal_weights` doesn't exist until this node itself produces it, so the optimal-weights series can only be computed here, not earlier. This also means the optimal series is only ever populated on `full`/`optimisation` analysis types, matching the conditional-graph routing already described in `orchestrator/graph.py` (`risk`-only queries route straight to `check_compliance` and skip `optimise` entirely).
+
+Both call the same underlying `compute_rolling_risk` tool
+(`servers/risk_engine/tools/rolling_cvar.py`), so the two series are
+computed identically — just against different weight vectors.
+
+**Both calls are wrapped as non-fatal.** A failure in either rolling
+computation is caught, logged, and returned as `None` rather than
+propagated — because this data feeds only a chart, and a chart-rendering
+failure must never be allowed to null out `risk_metrics` (which feeds the
+compliance check) or `optimisation_result`. This mirrors the same
+non-fatal isolation pattern already used for the GARCH forecast handoff.
+
+### Compliance CVaR provenance (`cvar_source`)
+
+The `CVAR_THRESHOLD` compliance rule needs one CVaR₉₅ figure to check
+against its limit, selected by `check_compliance.py::_select_cvar` from a
+priority-ordered fallback: GARCH-simulated → Monte Carlo → 1-day
+historical (full detail and the reason this fallback has a real
+consequence, not just a labelling one, is in
+[`COMPUTATIONS.md`](COMPUTATIONS.md#5-compliance-cvar-selection)).
+
+Which source was actually used (`cvar_source`) is computed by
+`_select_cvar` and now threaded all the way through:
+`ComplianceResult` (orchestrator state) → `ComplianceResponse` (API
+schema) → the Compliance tab UI, which states the source and horizon
+explicitly next to the gating CVaR figure. This exists so a degraded
+compliance check (the fallback state, where no simulation ran) is
+visible to whoever is reading the result, rather than silently presenting
+a 1-day figure under the same unqualified "CVaR 95%" label used
+elsewhere in the app.
 
 ---
 

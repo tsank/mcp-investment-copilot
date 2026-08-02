@@ -14,7 +14,7 @@ Given a portfolio (e.g. `RELIANCE.NS: 25%, TCS.NS: 20%, ...`) and a natural-lang
 
 1. Parses intent and identifies the type of analysis requested
 2. Fetches historical price data for the held securities
-3. Computes risk metrics — volatility, Sharpe ratio, VaR/CVaR, maximum drawdown
+3. Computes risk metrics — volatility, Sharpe ratio, VaR/CVaR, maximum drawdown — plus a real rolling CVaR/volatility evolution view (1M/3M/1Y windows, current vs. optimal portfolio)
 4. Runs a GARCH(1,1)-t volatility forecast for the next 10 trading days
 5. Optimises the portfolio (mean-variance, SLSQP solver) and computes the efficient frontier
 6. Simulates 1-year forward scenarios via Monte Carlo and GARCH-based path generation
@@ -24,6 +24,8 @@ Given a portfolio (e.g. `RELIANCE.NS: 25%, TCS.NS: 20%, ...`) and a natural-lang
 All of this is visible in a 7-tab dashboard: **My Portfolio**, **AI Recommendation**, **Compliance**, **Rebalance**, **Efficient Frontier**, **Scenarios**, and **Risk**.
 
 242 tests passing across all 5 MCP servers and the orchestration layer.
+
+**Deep dive:** for exactly how each risk and optimisation figure is computed — including why CVaR is reported at two genuinely different horizons (a 1-day historical figure and a 1-year forward-simulated one) and how that's labelled so the two are never confused — see [`COMPUTATIONS.md`](COMPUTATIONS.md).
 
 <!-- 🎥 Demo video: add Loom link here once recorded -->
 
@@ -48,7 +50,7 @@ Each of the 5 MCP servers is a genuine, independent [Model Context Protocol](htt
 - **v1 — AWS ECS Fargate**, MCP servers spawned as stdio subprocesses. Tagged [`v1-fargate`](../../tree/v1-fargate).
 - **v2 — AWS Lambda + API Gateway + S3/CloudFront** (current), MCP servers called as direct in-process functions for Lambda-friendly cold starts.
 
-Full request-lifecycle and deployment detail is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Full request-lifecycle and deployment detail is in [`ARCHITECTURE.md`](ARCHITECTURE.md). Full computation methodology — every formula, every model, and their honest limitations — is in [`COMPUTATIONS.md`](COMPUTATIONS.md).
 
 ### Why MCP?
 
@@ -156,6 +158,7 @@ The original deployment — two ECS Fargate services (API, UI), Docker images on
 │   └── compliance/
 ├── ui-react/                     React frontend (PWA-enabled)
 ├── data/fixtures/                Sample NSE price data
+├── docs/images/                  Illustrative charts referenced from COMPUTATIONS.md
 └── infra/
     ├── docker/
     │   ├── Dockerfile.api         v1 — Fargate API image
