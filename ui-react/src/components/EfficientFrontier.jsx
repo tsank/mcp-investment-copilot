@@ -206,18 +206,19 @@ export default function EfficientFrontier({ optimisation, riskMetrics, loading }
   // ── Layout ─────────────────────────────────────────────────────────────────
   const layout = {
     ...BASE_LAYOUT,
-    title:  "Efficient Frontier — Risk-Return Space",
+    title:  { text: "Efficient Frontier — Risk-Return Space" },
+    autosize: true,
     height: 560,
     xaxis: {
       ...BASE_LAYOUT.xaxis,
-      title:      "Annualised Volatility",
+      title:      { text: "Annualised Volatility" },
       type:       "linear",
       tickformat: ".0%",
       range:      [xMin, xMax],
     },
     yaxis: {
       ...BASE_LAYOUT.yaxis,
-      title:      "Annualised Expected Return",
+      title:      { text: "Annualised Expected Return", standoff: 20 },
       type:       "linear",
       tickformat: ".1%",
       range:      [yMin, yMax],
@@ -261,10 +262,11 @@ export default function EfficientFrontier({ optimisation, riskMetrics, loading }
       <div style={styles.card}>
         <div style={styles.cardTitle}>Risk-Return Space — Where do you sit?</div>
         <Plot
+          key={`${optimisation.sharpe_ratio}-${riskMetrics.cvar_95}`}
           data={data}
           layout={layout}
           config={config}
-          style={{ width: "100%" }}
+          style={{ width: "100%", height: "560px" }}
           useResizeHandler={true}
         />
       </div>
