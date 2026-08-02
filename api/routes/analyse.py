@@ -32,6 +32,8 @@ from api.schemas.response import (
     OptimisationResponse,
     PercentileResponse,
     RiskMetricsResponse,
+    RollingRiskResponse,
+    RollingWindowResponse,
     SimulationOutputResponse,
     SimulationResponse,
     ViolationResponse,
@@ -108,6 +110,8 @@ async def analyse(request: AnalyseRequest) -> AnalyseResponse:
         compliance=_build_compliance(state),
         risk_metrics=_build_risk_metrics(state),
         garch_forecast=_build_garch_forecast(state),
+        rolling_risk_current=_build_rolling_risk(state, "rolling_risk_current"),
+        rolling_risk_optimal=_build_rolling_risk(state, "rolling_risk_optimal"),
         simulation=_build_simulation(state),
         optimisation=_build_optimisation(state),
         analysis_type=analysis_type,
@@ -128,6 +132,8 @@ def _build_compliance(state: dict) -> ComplianceResponse | None:
         warnings=[WarningResponse(**w.dict()) for w in cr.warnings],
         rules_profile=cr.rules_profile,
         rules_version=cr.rules_version,
+        cvar_95=cr.cvar_95,
+        cvar_source=cr.cvar_source,
     )
 
 
@@ -166,6 +172,27 @@ def _build_garch_forecast(state: dict) -> GARCHForecastResponse | None:
             for symbol, asset in gr.per_asset.items()
         },
         horizon_days=gr.horizon_days,
+    )
+
+
+def _build_rolling_risk(state: dict, key: str) -> RollingRiskResponse | None:
+    rr = state.get(key)
+    if rr is None:
+        return None
+    return RollingRiskResponse(
+        windows={
+            wk: RollingWindowResponse(
+                rolling_cvar=w.rolling_cvar,
+                rolling_vol=w.rolling_vol,
+                window_end=w.window_end,
+                mean_cvar=w.mean_cvar,
+                mean_vol=w.mean_vol,
+                window_size=w.window_size,
+                n_points=w.n_points,
+            )
+            for wk, w in rr.windows.items()
+        },
+        computation_window=rr.computation_window,
     )
 
 

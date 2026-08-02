@@ -202,6 +202,9 @@ export default function App() {
           <RiskHistory
             riskMetrics={result?.risk_metrics}
             garchForecast={result?.garch_forecast}
+            rollingRiskCurrent={result?.rolling_risk_current}
+            rollingRiskOptimal={result?.rolling_risk_optimal}
+            optimisation={result?.optimisation}
             simulation={result?.simulation}
             loading={loading}
           />

@@ -46,6 +46,8 @@ class ComplianceResponse(BaseModel):
     warnings:      list[WarningResponse]
     rules_profile: str
     rules_version: str
+    cvar_95:       float
+    cvar_source:   str   # "garch_sim" | "monte_carlo" | "risk_metrics"
 
 
 # ── Risk metrics ──────────────────────────────────────────────────────────────
@@ -94,6 +96,31 @@ class GARCHForecastResponse(BaseModel):
     """
     per_asset:    dict[str, GARCHAssetForecastResponse]
     horizon_days: int
+
+
+# ── Rolling risk evolution (CVaR + vol over time) ─────────────────────────────
+
+class RollingWindowResponse(BaseModel):
+    """Rolling CVaR + vol series for one window length (1M/3M/1Y)."""
+    rolling_cvar: list[float]
+    rolling_vol:  list[float]
+    window_end:   list[int]
+    mean_cvar:    float
+    mean_vol:     float
+    window_size:  int
+    n_points:     int
+
+
+class RollingRiskResponse(BaseModel):
+    """
+    Rolling risk block for the Risk tab chart + posture strip.
+
+    None when compute_risk was skipped/failed (current) or when optimise
+    did not run (optimal — risk-only queries). windows keyed "21"/"63"/"252"
+    so the frontend selector switches client-side with no re-fetch.
+    """
+    windows:            dict[str, RollingWindowResponse]
+    computation_window: str
 
 
 # ── Simulation ────────────────────────────────────────────────────────────────
@@ -156,6 +183,8 @@ class AnalyseResponse(BaseModel):
     compliance:     Optional[ComplianceResponse]    = None
     risk_metrics:   Optional[RiskMetricsResponse]   = None
     garch_forecast: Optional[GARCHForecastResponse] = None
+    rolling_risk_current: Optional[RollingRiskResponse] = None
+    rolling_risk_optimal: Optional[RollingRiskResponse] = None
     simulation:     Optional[SimulationResponse]    = None
     optimisation:   Optional[OptimisationResponse]  = None
     analysis_type:  str = Field(

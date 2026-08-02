@@ -157,6 +157,8 @@ async def check_compliance(state: AgentState) -> dict:
         warnings=warnings,
         rules_version=data["rules_version"],
         rules_profile=data["rules_profile"],
+        cvar_95=cvar_95,
+        cvar_source=cvar_source,
     )
 
     return {

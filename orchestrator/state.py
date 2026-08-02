@@ -130,7 +130,46 @@ class RiskMetricsResult(BaseModel):
     computation_window: str            # e.g. "2y" — echoed for audit
 
 
-# ── Nested Sub-Models: GARCHResult ────────────────────────────────────────────
+class RollingWindowResult(BaseModel):
+    """
+    Rolling risk series for a single window length.
+    Nested inside RollingRiskResult.windows.
+
+    Same empirical CVaR method and positive-loss sign convention as
+    RiskMetricsResult, and the same annualised-vol convention
+    (std_daily × √252) — the underlying primitives are reused, not
+    re-derived. window_end indexes each point to the day its trailing
+    window ends, aligned to the portfolio return series.
+    """
+    rolling_cvar: list[float]          # CVaR_95 per window end-day, positive loss
+    rolling_vol:  list[float]          # annualised vol per window end-day
+    window_end:   list[int]            # end-day index per point (x-axis)
+    mean_cvar:    float                # mean of rolling_cvar
+    mean_vol:     float                # mean of rolling_vol
+    window_size:  int                  # window length in trading days
+    n_points:     int                  # len(rolling_cvar)
+
+
+class RollingRiskResult(BaseModel):
+    """
+    Output of compute_rolling_risk tool in the Risk Engine Server.
+    Populated by: compute_risk node (current weights) and optimise node
+                  (optimal weights) — two independent instances in state.
+    Consumed by: Risk tab "Rolling Risk Evolution" chart + posture strip
+                 (via API response).
+
+    Real rolling-window CVaR and volatility over the observed history,
+    holding weights fixed. Multiple windows (1M/3M/1Y) are precomputed so
+    the frontend selector switches client-side with no re-fetch. Replaces
+    the previously fabricated seeded-random-walk chart.
+
+    Note on endpoints: a window's last point uses only its trailing
+    window_size returns, whereas RiskMetricsResult.cvar_95 uses the full
+    window — so they will generally differ. Expected, not an error.
+    """
+    windows:            dict[str, RollingWindowResult]  # "21"/"63"/"252" → series
+    computation_window: str            # e.g. "2y" — echoed for audit
+
 
 class GARCHParams(BaseModel):
     """
@@ -381,6 +420,17 @@ class ComplianceResult(BaseModel):
     rules_version: str    # echoed back — closes the audit loop
     rules_profile: str    # echoed back — e.g. "retail_conservative"
 
+    cvar_95:      float   # the CVaR value actually used for CVAR_THRESHOLD
+    cvar_source:  str     # "garch_sim" | "monte_carlo" | "risk_metrics"
+    # Provenance for cvar_95, from _select_cvar's fallback priority:
+    #   "garch_sim"    — 1-year GARCH-simulated CVaR (best available)
+    #   "monte_carlo"  — 1-year Monte Carlo CVaR (GARCH sim unavailable)
+    #   "risk_metrics" — 1-day historical CVaR (no simulation available —
+    #                    the 25% threshold was calibrated for annual risk,
+    #                    so a breach is much less likely to fire in this
+    #                    fallback state; the frontend must label this
+    #                    honestly rather than imply an annual check ran)
+
 
 # ── AgentState ────────────────────────────────────────────────────────────────
 
@@ -433,10 +483,19 @@ class AgentState(BaseModel):
     #          passed to Simulator via this field
     garch_result:  Optional[GARCHResult] = None
 
+    # Source: compute_rolling_risk tool (current weights)
+    # Consumed by: Risk tab rolling chart + posture strip (via API response)
+    rolling_risk_current: Optional[RollingRiskResult] = None
+
     # ── Populated by optimise node ────────────────────────────────
     # Source: optimise_portfolio tool
     # Consumed by: check_compliance, synthesise
     optimisation_result: Optional[OptimisationResult] = None
+
+    # Source: compute_rolling_risk tool (optimal weights)
+    # Consumed by: Risk tab rolling chart + posture strip (via API response)
+    # Only populated when optimise runs (full/optimisation queries).
+    rolling_risk_optimal: Optional[RollingRiskResult] = None
 
     # ── Populated by simulate node ────────────────────────────────
     # Source: run_monte_carlo + run_garch_simulation tools

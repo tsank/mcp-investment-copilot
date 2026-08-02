@@ -1,32 +1,32 @@
 // src/components/RiskHistory.jsx
 //
-// Tab 7 — 📊 Risk History
+// Tab 7 — 📊 Risk
 //
-// Two charts:
-//   1. GARCH Volatility Forecast — next 10 trading days per asset
-//      Shows mean-reverting paths from current vol toward long-run vol
-//      Regime warning highlighted if any asset has persistence warning
+// Three sections:
+//   1. GARCH Volatility Forecast — next N trading days per asset, plotting the
+//      backend's real per-asset forecast (each asset's own fitted α+β).
 //
-//   2. Rolling CVaR History — 2-year backward-looking risk evolution
-//      v1: approximated from empirical CVaR as anchor point
-//      v2: computed from actual 252-day rolling windows
+//   2. Rolling Risk Evolution — real rolling CVaR over a trailing window,
+//      window-configurable (1M / 3M / 1Y), current + optimal portfolios
+//      overlaid. Each point is a real trailing-window CVaR computed in the
+//      risk engine — no fabrication.
+//
+//   3. Risk Posture strip — CVaR, vol, max drawdown, Sharpe as current +
+//      optimal; CVaR and vol carry a trend arrow vs their rolling mean.
 //
 // Props received from App.js:
-//   riskMetrics  {Object|null}  risk metrics including per-asset volatility
-//   simulation   {Object|null}  simulation result (for regime_warning)
-//   loading      {boolean}
-//
-// Design note on the rolling CVaR chart:
-//   In v1 we don't return per-day historical CVaR from the API.
-//   The approximation uses the empirical CVaR as the endpoint and
-//   generates a plausible historical path using a random walk anchored
-//   at that endpoint. A clear note is shown to the user.
-//   v2 will compute this properly from actual rolling windows.
+//   riskMetrics         {Object|null}  risk metrics incl. per-asset volatility
+//   garchForecast       {Object|null}  real per-asset GARCH forecast
+//   rollingRiskCurrent  {Object|null}  rolling CVaR/vol series, current weights
+//   rollingRiskOptimal  {Object|null}  rolling CVaR/vol series, optimal weights
+//   optimisation        {Object|null}  optimisation result (optimal vol/Sharpe)
+//   simulation          {Object|null}  simulation result (for regime_warning)
+//   loading             {boolean}
 
 import Plotly from "plotly.js-dist-min";
 import createPlotlyComponent from "react-plotly.js/factory";
 import { C, BASE_LAYOUT } from "../constants";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -83,12 +83,66 @@ const styles = {
     backgroundColor: color,
     display:         "inline-block",
   }),
+  selectorRow: {
+    display:        "flex",
+    justifyContent: "space-between",
+    alignItems:     "center",
+    marginBottom:   "12px",
+  },
+  segGroup: {
+    display:      "inline-flex",
+    border:       `1px solid ${"#4F8EF7"}44`,
+    borderRadius: "8px",
+    overflow:     "hidden",
+  },
+  segBtn: (active) => ({
+    padding:        "5px 14px",
+    fontSize:       "0.78rem",
+    fontFamily:     "IBM Plex Mono, monospace",
+    cursor:         "pointer",
+    border:         "none",
+    borderLeft:     `1px solid #4F8EF722`,
+    backgroundColor: active ? "#4F8EF7" : "transparent",
+    color:          active ? "#0A0F1E" : "#94A3B8",
+  }),
+  postureGrid: {
+    display:             "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap:                 "12px",
+    marginTop:           "4px",
+  },
+  postureCard: {
+    backgroundColor: "#1E2D4E",
+    borderRadius:    "8px",
+    padding:         "12px 14px",
+    fontFamily:      "IBM Plex Mono, monospace",
+  },
+  postureLabel: { fontSize: "0.72rem", color: "#94A3B8", marginBottom: "4px" },
+  postureValue: { fontSize: "1.35rem", color: "#E2E8F0" },
+  postureOpt:   { fontSize: "0.74rem", color: "#10B981", marginTop: "4px" },
+  postureHeading: {
+    color: "#94A3B8", fontSize: "0.78rem", fontWeight: 600,
+    letterSpacing: "1px", textTransform: "uppercase",
+    fontFamily: "Inter, sans-serif", margin: "4px 0 10px",
+  },
 };
 
 // Asset colours — consistent across both charts
 const ASSET_COLORS = [C.blue, C.green, C.amber, C.red, "#A855F7", "#06B6D4", "#F97316", "#84CC16"];
 
-export default function RiskHistory({ riskMetrics, garchForecast, simulation, loading }) {
+// Simple average of per-asset annualised vols — a portfolio-level vol proxy
+// for the posture card. (Not covariance-adjusted; a display summary only.)
+function avgVol(volDict) {
+  if (!volDict) return null;
+  const vals = Object.values(volDict);
+  return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+}
+
+export default function RiskHistory({ riskMetrics, garchForecast, rollingRiskCurrent, rollingRiskOptimal, optimisation, simulation, loading }) {
+
+  // Window selector for the rolling chart: "21" (1M) / "63" (3M) / "252" (1Y).
+  // Default 1M — shortest window, most sensitive to volatility clusters.
+  const [rollWindow, setRollWindow] = useState("21");
 
   // Regime badge: prefer the real per-asset GARCH regime/persistence signal;
   // fall back to the simulation-level flag if the forecast is unavailable.
@@ -127,39 +181,25 @@ export default function RiskHistory({ riskMetrics, garchForecast, simulation, lo
     });
   }, [garchForecast]);
 
-  // ── Rolling CVaR history ───────────────────────────────────────────────────
-  // v1 approximation: generate plausible history anchored at current CVaR
-  // Uses seeded random walk so it's deterministic (same result every render)
-  const rollingCvarData = useMemo(() => {
-    if (!riskMetrics) return { rolling: [], histMean: 0, days: [], cvarNow: 0 };
+  // ── Rolling risk series (real) ─────────────────────────────────────────────
+  // Selects the current + optimal rolling CVaR/vol series for the chosen
+  // window from the backend payload. No fabrication, no random walk — each
+  // point is a real trailing-window CVaR/vol computed in the risk engine.
+  // Optimal is present only when optimise ran (full/optimisation queries).
+  const rollData = useMemo(() => {
+    const cur = rollingRiskCurrent?.windows?.[rollWindow] || null;
+    const opt = rollingRiskOptimal?.windows?.[rollWindow] || null;
+    return { cur, opt };
+  }, [rollingRiskCurrent, rollingRiskOptimal, rollWindow]);
 
-    const nDays   = 496;   // ~2 years of trading days
-    const cvarNow = riskMetrics.cvar_95 * 100;
-
-    // Seeded pseudo-random number generator (Mulberry32)
-    // Deterministic — same seed always produces same sequence
-    // This ensures the chart doesn't flicker on re-renders
-    let seed = 42;
-    function rand() {
-      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    }
-
-    // Random walk anchored at cvarNow at the end
-    const noise  = Array.from({ length: nDays }, () => (rand() - 0.5) * 0.0016);
-    const cumsum = [];
-    noise.reduce((acc, v, i) => { cumsum[i] = acc + v; return cumsum[i]; }, 0);
-
-    // Shift so the last value equals cvarNow
-    const shift   = cvarNow / 100 - cumsum[nDays - 1];
-    const rolling = cumsum.map(v => Math.max(0.005, v + shift) * 100);
-    const histMean = rolling.reduce((s, v) => s + v, 0) / nDays;
-    const days    = Array.from({ length: nDays }, (_, i) => i);
-
-    return { rolling, histMean, days, cvarNow };
-  }, [riskMetrics]);
+  // Posture-strip trend helper: is the current value above/below its own
+  // rolling mean? Returns "up" | "down" | null. Used for CVaR and Vol only.
+  const trendVs = (value, mean) => {
+    if (value == null || mean == null) return null;
+    if (value > mean * 1.02) return "up";
+    if (value < mean * 0.98) return "down";
+    return "flat";
+  };
 
   // ── Empty / loading state ──────────────────────────────────────────────────
   if (loading || !riskMetrics) {
@@ -185,8 +225,6 @@ export default function RiskHistory({ riskMetrics, garchForecast, simulation, lo
     : null;
 
   const horizonDays = garchForecast?.horizon_days ?? 10;
-
-  const { rolling, histMean, days, cvarNow } = rollingCvarData;
 
   const garchLayout = {
     ...BASE_LAYOUT,
@@ -227,57 +265,52 @@ export default function RiskHistory({ riskMetrics, garchForecast, simulation, lo
     }] : [],
   };
 
-  const cvarHistData = [
-    {
-      type:          "scatter",
-      mode:          "lines",
-      name:          "Rolling CVaR 95% (252-day)",
-      x:             days,
-      y:             rolling,
-      line:          { color: C.blue, width: 1.5 },
-      fill:          "tozeroy",
-      fillcolor:     "rgba(79,142,247,0.10)",
-      hovertemplate: "Day %{x}<br>CVaR 95%: %{y:.2f}%<extra></extra>",
-    },
-  ];
+  // Real rolling CVaR chart: current + optimal lines at the selected window.
+  const WINDOW_LABEL = { "21": "1M (21-day)", "63": "3M (63-day)", "252": "1Y (252-day)" };
+  const cvarHistData = [];
+  if (rollData.cur) {
+    cvarHistData.push({
+      type: "scatter", mode: "lines",
+      name: "Current portfolio",
+      x: rollData.cur.window_end,
+      y: rollData.cur.rolling_cvar.map(v => v * 100),
+      line: { color: C.blue, width: 1.8 },
+      hovertemplate: "End-day %{x}<br>Current CVaR 95%: %{y:.2f}%<extra></extra>",
+    });
+  }
+  if (rollData.opt) {
+    cvarHistData.push({
+      type: "scatter", mode: "lines",
+      name: "Optimal portfolio",
+      x: rollData.opt.window_end,
+      y: rollData.opt.rolling_cvar.map(v => v * 100),
+      line: { color: C.green, width: 1.8, dash: "dot" },
+      hovertemplate: "End-day %{x}<br>Optimal CVaR 95%: %{y:.2f}%<extra></extra>",
+    });
+  }
+
+  // Full-window reported CVaR as a dashed reference. Different window than the
+  // rolling series by design (full ~2y vs trailing window) — labelled as such.
+  const fullWindowCvar = riskMetrics ? riskMetrics.cvar_95 * 100 : null;
 
   const cvarHistLayout = {
     ...BASE_LAYOUT,
-    title:  "Rolling CVaR 95% — 2-Year History (252-day window)",
+    title:  `Rolling Daily CVaR — Historical · ${WINDOW_LABEL[rollWindow]} lookback`,
     height: 360,
-    xaxis:  { ...BASE_LAYOUT.xaxis, title: {text: "Trading Days" }, type: "linear", dtick: 50 },
-    yaxis:  { ...BASE_LAYOUT.yaxis, title: {text: "CVaR 95% (%)" } , type: "linear", ticksuffix: "%" },
+    xaxis:  { ...BASE_LAYOUT.xaxis, title: { text: "Window end-day (trading days)" }, type: "linear", dtick: 50 },
+    yaxis:  { ...BASE_LAYOUT.yaxis, title: { text: "Daily CVaR 95% (%)" }, type: "linear", ticksuffix: "%" },
     margin: { l: 80, r: 40, t: 50, b: 70 },
-    shapes: [
-      {
-        type: "line", xref: "paper", yref: "y",
-        x0:   0, x1:   1, y0:   cvarNow, y1:   cvarNow,
-        line: { color: C.amber, width: 1.5, dash: "dash" },
-      },
-      {
-        type: "line", xref: "paper", yref: "y",
-        x0:   0, x1:   1, y0:   histMean, y1:   histMean,
-        line: { color: C.slate, width: 1, dash: "dot" },
-      },
-    ],
-    annotations: [
-      {
-        x:         0.98, y:    cvarNow,
-        xref:      "paper", yref: "y",
-        text:      `Current: ${cvarNow.toFixed(2)}%`,
-        showarrow: false,
-        font:      { color: C.amber, size: 9 },
-        xanchor:   "right", yanchor: "bottom",
-      },
-      {
-        x:         0.98, y:    histMean,
-        xref:      "paper", yref: "y",
-        text:      `2yr avg: ${histMean.toFixed(2)}%`,
-        showarrow: false,
-        font:      { color: C.slate, size: 9 },
-        xanchor:   "right", yanchor: "bottom",
-      },
-    ],
+    shapes: fullWindowCvar !== null ? [{
+      type: "line", xref: "paper", yref: "y",
+      x0: 0, x1: 1, y0: fullWindowCvar, y1: fullWindowCvar,
+      line: { color: C.slate, width: 1, dash: "dash" },
+    }] : [],
+    annotations: fullWindowCvar !== null ? [{
+      x: 0.98, y: fullWindowCvar, xref: "paper", yref: "y",
+      text: `Full-window CVaR: ${fullWindowCvar.toFixed(2)}%`,
+      showarrow: false, font: { color: C.slate, size: 9 },
+      xanchor: "right", yanchor: "bottom",
+    }] : [],
   };
 
   const config = {
@@ -285,6 +318,38 @@ export default function RiskHistory({ riskMetrics, garchForecast, simulation, lo
     displayModeBar:         true,
     modeBarButtonsToRemove: ["lasso2d", "select2d"],
   };
+
+  // ── Posture strip metrics ──────────────────────────────────────────────────
+  // CVaR + Vol carry trend arrows (current value vs the selected window's
+  // rolling mean). Max drawdown + Sharpe show current + optimal values only —
+  // a rolling trend for those isn't statistically clean on short windows.
+  const pct = (v) => (v == null ? "—" : `${(v * 100).toFixed(2)}%`);
+  const num = (v) => (v == null ? "—" : v.toFixed(2));
+
+  const curCvar  = riskMetrics?.cvar_95 ?? null;
+  const curVol   = riskMetrics ? avgVol(riskMetrics.volatility) : null;
+  const optCvar  = rollData.opt ? rollData.opt.rolling_cvar.at(-1) : null;
+  const optVol   = optimisation?.portfolio_volatility ?? null;
+
+  const cvarTrend = trendVs(curCvar, rollData.cur?.mean_cvar);
+  const volTrend  = trendVs(curVol,  rollData.cur?.mean_vol);
+
+  const posture = [
+    { label: "CVaR 95% · Daily", value: pct(curCvar),                     trend: cvarTrend,
+      optLabel: optCvar != null ? `optimal ${pct(optCvar)}` : null },
+    { label: "Portfolio vol", value: pct(curVol),                     trend: volTrend,
+      optLabel: optVol != null ? `optimal ${pct(optVol)}` : null },
+    { label: "Max drawdown",  value: pct(riskMetrics?.max_drawdown),  trend: null,
+      optLabel: null },
+    { label: "Sharpe ratio",  value: num(riskMetrics?.sharpe_ratio),  trend: null,
+      optLabel: optimisation ? `optimal ${num(optimisation.sharpe_ratio)}` : null },
+  ];
+
+  const trendArrow = (t) =>
+    t === "up"   ? { ch: "↑", col: C.red }
+  : t === "down" ? { ch: "↓", col: C.green }
+  : t === "flat" ? { ch: "→", col: C.slate }
+  : null;
 
   return (
     <div style={styles.container}>
@@ -318,20 +383,78 @@ export default function RiskHistory({ riskMetrics, garchForecast, simulation, lo
         </div>
       </div>
 
-      {/* Rolling CVaR history */}
+      {/* Rolling risk evolution — real, window-configurable, current + optimal */}
       <div style={{ ...styles.card, minHeight: "420px" }}>
-        <div style={styles.cardTitle}>Historical Risk Evolution</div>
-        <Plot
-          data={cvarHistData}
-          layout={cvarHistLayout}
-          config={config}
-          style={{ width: "100%" }}
-          useResizeHandler={true}
-        />
-        <div style={styles.note}>
-          ⚠️ v1 approximation: rolling CVaR path is simulated from the empirical
-          CVaR endpoint. v2 will compute from actual 252-day rolling windows.
+        <div style={styles.selectorRow}>
+          <div style={styles.cardTitle}>Rolling Daily CVaR · Historical</div>
+          <div style={styles.segGroup} role="group" aria-label="Rolling window">
+            {[["21", "1M"], ["63", "3M"], ["252", "1Y"]].map(([w, lbl]) => (
+              <button
+                key={w}
+                style={styles.segBtn(rollWindow === w)}
+                onClick={() => setRollWindow(w)}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {cvarHistData.length > 0 ? (
+          <>
+            <Plot
+              key={rollWindow}
+              data={cvarHistData}
+              layout={cvarHistLayout}
+              config={config}
+              style={{ width: "100%" }}
+              useResizeHandler={true}
+            />
+            <div style={styles.legendRow}>
+              <span style={styles.legendItem()}>
+                <span style={styles.legendDot(C.blue)} /> Current portfolio
+              </span>
+              {rollData.opt && (
+                <span style={styles.legendItem()}>
+                  <span style={styles.legendDot(C.green)} /> Optimal portfolio
+                </span>
+              )}
+            </div>
+            <div style={styles.note}>
+              Each point is a 1-day CVaR estimated from a trailing {WINDOW_LABEL[rollWindow]}{" "}
+              window of history — not the 1-year forward-simulated CVaR shown on the
+              Compliance tab. The endpoint differs from the full-window CVaR by design;
+              they measure different lookback lengths.
+              {!rollData.opt && " Optimal overlay appears on full/optimisation queries."}
+            </div>
+          </>
+        ) : (
+          <div style={{ ...styles.emptyState, padding: "40px 20px" }}>
+            Rolling risk unavailable — history too short for this window.
+          </div>
+        )}
+      </div>
+
+      {/* Risk posture strip */}
+      <div style={styles.postureHeading}>Risk Posture</div>
+      <div style={styles.postureGrid}>
+        {posture.map((p) => {
+          const a = trendArrow(p.trend);
+          return (
+            <div key={p.label} style={styles.postureCard}>
+              <div style={styles.postureLabel}>{p.label}</div>
+              <div style={styles.postureValue}>
+                {p.value}
+                {a && (
+                  <span style={{ color: a.col, fontSize: "0.9rem", marginLeft: "6px" }}>
+                    {a.ch}<span style={{ fontSize: "0.62rem", color: C.slate }}> vs avg</span>
+                  </span>
+                )}
+              </div>
+              {p.optLabel && <div style={styles.postureOpt}>{p.optLabel}</div>}
+            </div>
+          );
+        })}
       </div>
 
     </div>

@@ -144,8 +144,8 @@ function formatMetric(key, value) {
 
 // Human-readable metric names
 const METRIC_LABELS = {
-  cvar_95:          "CVaR 95%",
-  cvar_99:          "CVaR 99%",
+  cvar_95:          "CVaR 95% · Daily (historical)",
+  cvar_99:          "CVaR 99% · Daily (historical)",
   var_95:           "VaR 95%",
   var_99:           "VaR 99%",
   sharpe_ratio:     "Sharpe Ratio",
@@ -153,6 +153,29 @@ const METRIC_LABELS = {
   portfolio_return: "Ann. Return",
   risk_free_rate:   "Risk-Free Rate",
   computation_window: "Window",
+};
+
+// Truthful label for the CVaR that actually gates compliance — driven by
+// cvar_source from _select_cvar's fallback priority (garch_sim → monte_carlo
+// → risk_metrics), so the label can never drift out of sync with what was
+// actually computed. This is a DIFFERENT number/method from the Risk Metrics
+// table's cvar_95 above (always the 1-day historical figure) whenever the
+// source is a simulation.
+const CVAR_SOURCE_LABELS = {
+  garch_sim: {
+    label: "CVaR 95% · 1-year (GARCH-simulated)",
+    note:  "252-trading-day forward simulation using fitted GARCH dynamics.",
+  },
+  monte_carlo: {
+    label: "CVaR 95% · 1-year (Monte Carlo)",
+    note:  "252-trading-day forward simulation, static distribution — GARCH simulation unavailable.",
+  },
+  risk_metrics: {
+    label: "CVaR 95% · Daily (historical) — no forward simulation available",
+    note:  "⚠️ Both simulations were unavailable. This threshold check is comparing a 1-day figure " +
+           "against a limit calibrated for annual risk — a breach is far less likely to fire in this " +
+           "fallback state than when a simulation is available.",
+  },
 };
 
 // Order metrics for display — most important first
@@ -201,6 +224,23 @@ export default function ComplianceCheck({ compliance, riskMetrics, loading }) {
             <div style={styles.rulesInfo}>
               Profile: {compliance.rules_profile} · Version: {compliance.rules_version}
             </div>
+
+            {/* Gating CVaR — the value actually checked against CVAR_THRESHOLD.
+                Label is driven by cvar_source, never hardcoded, so it cannot
+                drift out of sync with what was actually computed. */}
+            {compliance.cvar_source && (
+              <div style={{ ...styles.rulesInfo, marginTop: "4px" }}>
+                {(CVAR_SOURCE_LABELS[compliance.cvar_source] || {}).label ||
+                  `CVaR 95% (source: ${compliance.cvar_source})`}
+                {": "}
+                {(compliance.cvar_95 * 100).toFixed(1)}%
+                {CVAR_SOURCE_LABELS[compliance.cvar_source]?.note && (
+                  <div style={{ fontSize: "0.7rem", color: C.slate, marginTop: "3px", fontStyle: "italic" }}>
+                    {CVAR_SOURCE_LABELS[compliance.cvar_source].note}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Violations table */}
             <div style={styles.cardTitle}>Hard Violations</div>

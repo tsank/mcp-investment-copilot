@@ -62,6 +62,8 @@ def _breach_result() -> ComplianceResult:
         warnings=[],
         rules_version="v1.0",
         rules_profile="retail_conservative",
+        cvar_95=0.391,
+        cvar_source="garch_sim",
     )
  
  
@@ -72,6 +74,8 @@ def _passing_result() -> ComplianceResult:
         warnings=[],
         rules_version="v1.0",
         rules_profile="retail_conservative",
+        cvar_95=0.18,
+        cvar_source="garch_sim",
     )
  
  
@@ -229,4 +233,3 @@ class TestHelperFunctionsDirectly:
         assert _recommendation_mentions_violations(
             "this violates sector_cap", cr
         ) is True
- 

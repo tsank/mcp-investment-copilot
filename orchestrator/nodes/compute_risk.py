@@ -58,6 +58,10 @@ import logging
 
 from servers.risk_engine.tools.risk_metrics import compute_risk_metrics
 from servers.risk_engine.tools.garch_forecast import compute_garch_forecast
+from servers.risk_engine.tools.rolling_cvar import (
+    compute_rolling_risk,
+    rolling_risk_to_state,
+)
 from orchestrator.state import (
     AgentState,
     GARCHAssetResult,
@@ -203,9 +207,32 @@ async def compute_risk(state: AgentState) -> dict:
         current_vols=garch_data["current_vols"],
     )
 
+    # ── Rolling risk (current weights) — non-fatal ────────────────────────────
+    # Real rolling CVaR + vol across 1M/3M/1Y windows for the CURRENT
+    # portfolio. Isolated from the try above: this feeds only a chart, so a
+    # failure here must NOT null out risk_metrics (which feeds compliance)
+    # or garch_result. On failure we log, record the error, continue with None.
+    rolling_current = None
+    rolling_errors: list[str] = []
+    try:
+        rolling_raw = await asyncio.to_thread(
+            compute_rolling_risk,
+            log_returns=state.market_data.log_returns,
+            weights=state.portfolio.holdings,
+        )
+        rolling_current = rolling_risk_to_state(rolling_raw)
+        logger.info(
+            "compute_risk: rolling_risk (current) ok — windows=%s",
+            list(rolling_raw["windows"].keys()),
+        )
+    except Exception as exc:
+        logger.warning("compute_risk: rolling_risk failed (non-fatal) — %s", exc)
+        rolling_errors = [f"compute_risk.rolling_risk: {exc}"]
+
     return {
-        "risk_metrics":    risk_metrics,
-        "garch_result":    garch,
-        "execution_trace": state.execution_trace + ["compute_risk:ok"],
-        "errors":          state.errors,
+        "risk_metrics":         risk_metrics,
+        "garch_result":         garch,
+        "rolling_risk_current": rolling_current,
+        "execution_trace":      state.execution_trace + ["compute_risk:ok"],
+        "errors":               state.errors + rolling_errors,
     }

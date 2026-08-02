@@ -57,6 +57,10 @@ import logging
 import asyncio
 
 from servers.portfolio_optimiser.tools.optimise import optimise_portfolio
+from servers.risk_engine.tools.rolling_cvar import (
+    compute_rolling_risk,
+    rolling_risk_to_state,
+)
 from orchestrator.state import (
     AgentState,
     FrontierPoint,
@@ -145,8 +149,31 @@ async def optimise(state: AgentState) -> dict:
         solver_used=data["solver_used"],
     )
 
+    # ── Rolling risk (optimal weights) — non-fatal ────────────────────────────
+    # Same rolling CVaR + vol series as compute_risk builds for current
+    # weights, but for the OPTIMAL portfolio — so the Risk tab can overlay
+    # the two and show diversification value through volatility clusters.
+    # Isolated: a failure here must not null out optimisation_result.
+    rolling_optimal = None
+    rolling_errors: list[str] = []
+    try:
+        rolling_raw = await asyncio.to_thread(
+            compute_rolling_risk,
+            log_returns=state.market_data.log_returns,
+            weights=data["optimal_weights"],
+        )
+        rolling_optimal = rolling_risk_to_state(rolling_raw)
+        logger.info(
+            "optimise: rolling_risk (optimal) ok — windows=%s",
+            list(rolling_raw["windows"].keys()),
+        )
+    except Exception as exc:
+        logger.warning("optimise: rolling_risk failed (non-fatal) — %s", exc)
+        rolling_errors = [f"optimise.rolling_risk: {exc}"]
+
     return {
-        "optimisation_result": optimisation_result,
-        "execution_trace":     state.execution_trace + ["optimise:ok"],
-        "errors":              state.errors,
+        "optimisation_result":  optimisation_result,
+        "rolling_risk_optimal": rolling_optimal,
+        "execution_trace":      state.execution_trace + ["optimise:ok"],
+        "errors":               state.errors + rolling_errors,
     }
