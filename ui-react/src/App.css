@@ -106,6 +106,21 @@ body {
   overflow-y: auto;
 }
 
+/* ── Disclaimer footer ──────────────────────────────────────────────────────── */
+/* Global, static — rendered on every tab. Muted so it reads as a persistent
+   system notice rather than part of any analysis output. */
+.disclaimer-footer {
+  flex-shrink: 0;
+  padding: 14px 24px;
+  border-top: 1px solid #1E2D4E;
+  background-color: #0A0F1E;
+  color: #94A3B8;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
 /* ── Scrollbar styling ──────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;

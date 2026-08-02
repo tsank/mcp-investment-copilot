@@ -208,6 +208,17 @@ export default function App() {
 
       </main>
 
+      {/* Global disclaimer footer — visible on every tab, independent of any
+          analysis having run. Static text: this is a portfolio-analysis
+          demonstration, not regulated financial advice. */}
+      <footer className="disclaimer-footer">
+        For demonstration and educational use only. This tool performs
+        quantitative portfolio analysis and does not constitute financial,
+        investment, or trading advice. Figures are model estimates, not
+        guarantees. Consult a SEBI-registered investment adviser before making
+        any investment decision.
+      </footer>
+
     </div>
   );
 }
