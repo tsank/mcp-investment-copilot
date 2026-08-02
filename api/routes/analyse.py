@@ -27,6 +27,8 @@ from api.schemas.request import AnalyseRequest
 from api.schemas.response import (
     AnalyseResponse,
     ComplianceResponse,
+    GARCHAssetForecastResponse,
+    GARCHForecastResponse,
     OptimisationResponse,
     PercentileResponse,
     RiskMetricsResponse,
@@ -105,6 +107,7 @@ async def analyse(request: AnalyseRequest) -> AnalyseResponse:
         recommendation=recommendation,
         compliance=_build_compliance(state),
         risk_metrics=_build_risk_metrics(state),
+        garch_forecast=_build_garch_forecast(state),
         simulation=_build_simulation(state),
         optimisation=_build_optimisation(state),
         analysis_type=analysis_type,
@@ -143,6 +146,26 @@ def _build_risk_metrics(state: dict) -> RiskMetricsResponse | None:
         portfolio_return=rm.portfolio_return,
         risk_free_rate=rm.risk_free_rate,
         computation_window=rm.computation_window,
+    )
+
+
+def _build_garch_forecast(state: dict) -> GARCHForecastResponse | None:
+    gr = state.get("garch_result")
+    if gr is None:
+        return None
+    return GARCHForecastResponse(
+        per_asset={
+            symbol: GARCHAssetForecastResponse(
+                vol_forecast=asset.vol_forecast,
+                alpha_plus_beta=asset.alpha_plus_beta,
+                current_vol=asset.current_vol,
+                longrun_vol=asset.longrun_vol,
+                regime=asset.regime,
+                persistence_warning=asset.persistence_warning,
+            )
+            for symbol, asset in gr.per_asset.items()
+        },
+        horizon_days=gr.horizon_days,
     )
 
 

@@ -88,45 +88,44 @@ const styles = {
 // Asset colours — consistent across both charts
 const ASSET_COLORS = [C.blue, C.green, C.amber, C.red, "#A855F7", "#06B6D4", "#F97316", "#84CC16"];
 
-export default function RiskHistory({ riskMetrics, simulation, loading }) {
+export default function RiskHistory({ riskMetrics, garchForecast, simulation, loading }) {
 
-  const regimeWarning = simulation?.regime_warning || false;
+  // Regime badge: prefer the real per-asset GARCH regime/persistence signal;
+  // fall back to the simulation-level flag if the forecast is unavailable.
+  const anyElevated = garchForecast
+    ? Object.values(garchForecast.per_asset).some(
+        a => a.regime === "elevated" || a.persistence_warning
+      )
+    : false;
+  const regimeWarning = anyElevated || simulation?.regime_warning || false;
 
   // ── GARCH volatility forecast ──────────────────────────────────────────────
   // useMemo MUST be before any early return — React hooks rules.
-  // Only recompute when riskMetrics changes.
+  // Plots the backend's real per-asset forecast directly. Each asset's
+  // vol_forecast σ_{T+1}..σ_{T+H} was computed with that asset's OWN fitted
+  // persistence (α+β) via _compute_vol_forecast in garch_forecast.py.
+  // No recomputation, no shared persistence constant, no frontend GARCH math.
   const garchData = useMemo(() => {
-    if (!riskMetrics) return [];
+    if (!garchForecast) return [];
 
-    const days    = Array.from({ length: 10 }, (_, i) => i + 1);  // [1..10]
-    const entries = Object.entries(riskMetrics.volatility);
-    const longrun = entries.reduce((s, [, v]) => s + v, 0) / entries.length;
-
-    // GARCH persistence parameter — typical value for equity markets
-    // In v1 we use 0.92 as a representative value
-    // v2 will use the actual fitted alpha+beta from the GARCH result
-    const PERSISTENCE = 0.92;
-
-    return entries.map(([symbol, currentVol], idx) => {
-      // Mean-reverting GARCH forecast:
-      // σ_{t+h} = σ_LR + (σ_t - σ_LR) * persistence^h
-      const forecast = days.map(h =>
-        (longrun + (currentVol - longrun) * Math.pow(PERSISTENCE, h)) * 100
-      );
+    return Object.entries(garchForecast.per_asset).map(([symbol, asset], idx) => {
+      const forecast = asset.vol_forecast;              // already annualised (fraction)
+      const days = Array.from({ length: forecast.length }, (_, i) => i + 1);
 
       return {
         type:   "scatter",
         mode:   "lines+markers",
         name:   symbol.replace(".NS", ""),
         x:      days,
-        y:      forecast,
+        y:      forecast.map(v => v * 100),             // fraction → percent for display
         line:   { color: ASSET_COLORS[idx % ASSET_COLORS.length], width: 2 },
         marker: { size: 5 },
         hovertemplate:
-          `${symbol}<br>Day %{x}<br>Forecast vol: %{y:.2f}%<extra></extra>`,
+          `${symbol}<br>Day %{x}<br>Forecast vol: %{y:.2f}%` +
+          `<br>α+β = ${asset.alpha_plus_beta.toFixed(3)}<extra></extra>`,
       };
     });
-  }, [riskMetrics]);
+  }, [garchForecast]);
 
   // ── Rolling CVaR history ───────────────────────────────────────────────────
   // v1 approximation: generate plausible history anchored at current CVaR
@@ -176,16 +175,24 @@ export default function RiskHistory({ riskMetrics, simulation, loading }) {
   }
 
   // ── Derived layout values (safe — riskMetrics is guaranteed non-null here) ─
-  const entries    = Object.entries(riskMetrics.volatility);
-  const longrunVol = entries.reduce((s, [, v]) => s + v, 0) / entries.length * 100;
+  // Long-run reference: average of the REAL per-asset unconditional vols
+  // (each asset reverts to its own longrun_vol; this line is an average
+  // reference only). null when the GARCH forecast is unavailable.
+  const longrunVol = garchForecast
+    ? Object.values(garchForecast.per_asset)
+        .reduce((s, a) => s + a.longrun_vol, 0)
+        / Object.keys(garchForecast.per_asset).length * 100
+    : null;
+
+  const horizonDays = garchForecast?.horizon_days ?? 10;
 
   const { rolling, histMean, days, cvarNow } = rollingCvarData;
 
   const garchLayout = {
     ...BASE_LAYOUT,
     title:  regimeWarning
-      ? "GARCH Volatility Forecast — Next 10 Trading Days  ⚠️ ELEVATED REGIME"
-      : "GARCH Volatility Forecast — Next 10 Trading Days",
+      ? `GARCH Volatility Forecast — Next ${horizonDays} Trading Days  ⚠️ ELEVATED REGIME`
+      : `GARCH Volatility Forecast — Next ${horizonDays} Trading Days`,
     height: 360,
     xaxis:  {
       ...BASE_LAYOUT.xaxis,
@@ -200,24 +207,24 @@ export default function RiskHistory({ riskMetrics, simulation, loading }) {
       ticksuffix: "%",
     },
     margin: { l: 80, r: 40, t: 50, b: 70 },
-    shapes: [{
+    shapes: longrunVol !== null ? [{
       type: "line",
       xref: "paper", yref: "y",
       x0:   0, x1:   1,
       y0:   longrunVol, y1: longrunVol,
       line: { color: C.slate, width: 1, dash: "dot" },
-    }],
-    annotations: [{
+    }] : [],
+    annotations: longrunVol !== null ? [{
       x:         0.98,
       y:         longrunVol,
       xref:      "paper",
       yref:      "y",
-      text:      `Long-run avg: ${longrunVol.toFixed(1)}%`,
+      text:      `Avg long-run vol: ${longrunVol.toFixed(1)}%`,
       showarrow: false,
       font:      { color: C.slate, size: 9 },
       xanchor:   "right",
       yanchor:   "bottom",
-    }],
+    }] : [],
   };
 
   const cvarHistData = [
@@ -300,8 +307,14 @@ export default function RiskHistory({ riskMetrics, simulation, loading }) {
           useResizeHandler={true}
         />
         <div style={styles.note}>
-          GARCH(1,1)-t model · persistence = 0.92 (representative) ·
-          v2 will use actual fitted α+β per asset
+          {garchForecast ? (() => {
+            const abs = Object.values(garchForecast.per_asset)
+              .map(a => a.alpha_plus_beta);
+            const lo = Math.min(...abs).toFixed(3);
+            const hi = Math.max(...abs).toFixed(3);
+            return `GARCH(1,1)-t model · fitted persistence α+β ${lo}–${hi} across assets · ` +
+              `deterministic expected volatility path (not a stochastic simulation)`;
+          })() : "GARCH forecast unavailable — run analysis to compute."}
         </div>
       </div>
 

@@ -201,6 +201,7 @@ export default function App() {
         {activeTab === "risk" && (
           <RiskHistory
             riskMetrics={result?.risk_metrics}
+            garchForecast={result?.garch_forecast}
             simulation={result?.simulation}
             loading={loading}
           />

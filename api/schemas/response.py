@@ -63,6 +63,39 @@ class RiskMetricsResponse(BaseModel):
     computation_window: str
 
 
+# ── GARCH volatility forecast ─────────────────────────────────────────────────
+
+class GARCHAssetForecastResponse(BaseModel):
+    """
+    Per-asset GARCH forecast surfaced to the Risk tab's GARCH chart.
+
+    Subset of GARCHAssetResult (orchestrator/state.py) — only the fields the
+    frontend chart needs. The full fitted params, AIC/BIC etc. are not sent;
+    they are internal to the model handoff to the Simulator.
+
+    vol_forecast is the deterministic expected volatility term structure
+    σ_{T+1}..σ_{T+H}, already computed per asset with that asset's own fitted
+    persistence (α+β). The frontend plots it directly — no recomputation.
+    """
+    vol_forecast:        list[float]   # σ_{T+1}..σ_{T+H}, annualised, per-asset
+    alpha_plus_beta:     float         # this asset's real fitted persistence
+    current_vol:         float         # σ_T, annualised — forecast start point
+    longrun_vol:         float         # unconditional vol this asset reverts to
+    regime:              str           # "elevated" | "normal" | "suppressed"
+    persistence_warning: bool          # True if α+β >= 1.0 (near non-stationary)
+
+
+class GARCHForecastResponse(BaseModel):
+    """
+    GARCH forecast block for POST /api/v1/analyse.
+
+    None when the compute_risk node was skipped or failed. Populated
+    directly from state.garch_result — no new computation at the API layer.
+    """
+    per_asset:    dict[str, GARCHAssetForecastResponse]
+    horizon_days: int
+
+
 # ── Simulation ────────────────────────────────────────────────────────────────
 
 class PercentileResponse(BaseModel):
@@ -122,6 +155,7 @@ class AnalyseResponse(BaseModel):
     )
     compliance:     Optional[ComplianceResponse]    = None
     risk_metrics:   Optional[RiskMetricsResponse]   = None
+    garch_forecast: Optional[GARCHForecastResponse] = None
     simulation:     Optional[SimulationResponse]    = None
     optimisation:   Optional[OptimisationResponse]  = None
     analysis_type:  str = Field(
