@@ -42,7 +42,7 @@ All notable changes to Portfolio Copilot are documented here.
 ### Fixed
 - Docker's default buildx output includes an attestation/SBOM manifest that Lambda's container image support rejects outright — fixed by building with `--provenance=false --sbom=false`
 - `logging.basicConfig()` is a silent no-op on Lambda (runtime pre-configures the root logger) — fixed with `force=True`; this was the precondition for diagnosing the bug below, since it had made every `logger.info()` call invisible in CloudWatch
-- Scenario simulation node taking ~30s/call (~60s per full pipeline run): diagnosed as a single-threaded, unvectorised 10,000-simulation × 252-day for-loop in `run_garch_simulation`, not a Lambda resource constraint (confirmed by doubling Lambda memory/vCPU with no effect). Pragmatic fix: reduced simulation count 10,000 → 1,000 (pipeline now ~17–26s, demo-viable). Proper numpy vectorisation deliberately deferred to v3 — out of v2's infra-only scope
+- Scenario simulation node taking ~30s/call (~60s per full pipeline run): diagnosed as a single-threaded, unvectorised 10,000-simulation × 252-day for-loop in `run_garch_simulation`, not a Lambda resource constraint (confirmed by doubling Lambda memory/vCPU with no effect). Pragmatic fix: reduced simulation count 10,000 → 1,000 (pipeline now ~17–26s, demo-viable). Proper numpy vectorisation deliberately deferred to v4 — out of v2's infra-only scope
 - iOS Safari blocks/restricts plain HTTP more aggressively than desktop browsers — the S3 HTTP-only website endpoint worked on desktop but failed on iPhone Safari; resolved by requiring the CloudFront HTTPS URL
 
 ### Removed
@@ -56,9 +56,9 @@ All notable changes to Portfolio Copilot are documented here.
 
 ---
 
-## [v3-guardrails] — 2026-08-02 — Guardrails hardening + Risk tab overhaul
+## [v3] — 2026-08-02 — Guardrails hardening + Risk tab overhaul
 
-**Branch:** `v3-guardrails`. Guardrails 1–5 and the Risk tab overhaul (item 8) complete; items 6–7 (API Gateway rate limiting, in-process MCP state-leak check) outstanding before merge to `main`.
+**Branch:** `v3-guardrails`. Guardrails 1–5 and the Risk tab overhaul complete; API Gateway rate limiting and an in-process MCP state-leak check outstanding before merge to `main`. Sequenced before the sector-wide-universe/DE-solver work (now v4) so infra risk (v2), guardrail/accuracy risk (v3), and modeling risk (v4) stay isolated from each other.
 
 ### Added — guardrails
 - Input validation: unknown-ticker allowlist + max-holdings complexity cap (`api/schemas/request.py`)
@@ -96,15 +96,19 @@ All notable changes to Portfolio Copilot are documented here.
 - `COMPUTATIONS.md` — detailed methodology reference: the CVaR two-horizon distinction, GARCH forecasting (including a non-stationarity / FIGARCH discussion), rolling risk evolution mechanics, optimisation, and compliance CVaR provenance, with illustrative generated charts (`docs/images/`)
 - `ARCHITECTURE.md` — added a "Data flow notes" section covering the `compute_risk`/`optimise` rolling-risk node split and `cvar_source` provenance threading
 
+### Known issue — portfolio optimiser (pre-existing, unrelated to this branch)
+- `optimise_portfolio` doesn't validate `n_assets × max_weight ≥ 1` before running the efficient frontier scan — an infeasible constraint set (e.g. 2 assets with the default 0.4 per-asset cap: `2 × 0.4 = 0.8 < 1.0`) silently runs 50 doomed SLSQP calls before surfacing a generic `RuntimeError`, instead of failing fast with a clear message. Confirmed pre-existing — `optimise.py` untouched since the original optimiser build, unrelated to any change in this branch. Doesn't affect real usage: actual portfolios use 5+ assets, comfortably feasible (`6 × 0.4 = 2.4`). 6 of `test_optimise.py`'s 34 tests fail on this, built on a 2-asset-only fixture incompatible with the default constraint. Not blocking deploy.
+
 ### Outstanding before merge to `main`
-- API Gateway rate limiting (item 6)
-- In-process MCP state-leak check for mixed-intent requests back-to-back, relevant given v2's in-process MCP refactor (item 7)
+- API Gateway rate limiting
+- In-process MCP state-leak check for mixed-intent requests back-to-back, relevant given v2's in-process MCP refactor
 - Re-verify the bare-string-title / missing-`autosize` Plotly pattern on the three chart components not yet re-checked (see Efficient Frontier fix above)
+- Fix the portfolio optimiser's constraint-feasibility validation (see Known issue above)
 - Minor housekeeping: stray unreferenced `masktable512.png` in `ui-react/public/`
 
 ---
 
-## [v3] — Planned, after P3
+## [v4] — Planned, after P3
 
 - Sector-wide symbol universe expansion, live market data
 - Buy/sell-new-ticker suggestions (not just reweighting held positions)

@@ -69,7 +69,7 @@ Splitting the domain logic into standalone MCP servers (rather than one monolith
 | LLM | OpenAI GPT-4o |
 | Risk modelling | `arch` (GARCH), `scipy`, `numpy`, `pandas` |
 | Optimisation | `scipy` (SLSQP solver) |
-| Market data | `yfinance` (CSV fixtures in v1/v2; live data planned for v3) |
+| Market data | `yfinance` (CSV fixtures in v1/v2; live data planned for v4) |
 | Deployment (v2, current) | AWS Lambda (ARM64/Graviton2), API Gateway, S3, CloudFront |
 | Deployment (v1, previous) | AWS ECS Fargate, ECR, Secrets Manager, CloudWatch |
 
@@ -125,7 +125,7 @@ A few real issues came up building this that are worth flagging, since they're t
 - **ARM64/Graviton2 for the Lambda function.** Unlike ECS Fargate in this region (which required `linux/amd64` images for v1), Lambda's container image support runs ARM64/Graviton2 natively — cheaper per millisecond of compute and no architecture mismatch to work around on an Apple Silicon dev machine.
 - **Docker's attestation manifest breaks Lambda deploys.** Buildx's default output includes an attestation/SBOM manifest that Lambda's container image support rejects outright (`InvalidParameterValueException: image manifest ... is not supported`). Every build needs `--provenance=false --sbom=false` explicitly.
 - **`logging.basicConfig()` is a silent no-op on Lambda.** Lambda's Python runtime pre-configures the root logger before application code runs, so a plain `basicConfig()` call does nothing — per Python's own documented behaviour, but easy to miss. Every `logger.info()` in the orchestrator was invisible in CloudWatch until this was set with `force=True`, which is what actually made the next bug diagnosable.
-- **The real GARCH bottleneck wasn't infra — it was an unvectorised loop.** The scenario simulation node was taking ~30s per call (~60s for a full current + optimal-weights run). Doubling Lambda memory (and the vCPUs that come with it) had no effect, which confirmed the bottleneck was single-threaded Python, not available compute — a nested 10,000-simulation × 252-day for-loop in `run_garch_simulation`, never vectorised. The pragmatic v2 fix was reducing simulation count 10,000 → 1,000 (real pipeline time now ~17–26s, demo-viable); a proper numpy-vectorised rewrite is deliberately deferred to v3, since v2's scope was infra only, not modeling changes.
+- **The real GARCH bottleneck wasn't infra — it was an unvectorised loop.** The scenario simulation node was taking ~30s per call (~60s for a full current + optimal-weights run). Doubling Lambda memory (and the vCPUs that come with it) had no effect, which confirmed the bottleneck was single-threaded Python, not available compute — a nested 10,000-simulation × 252-day for-loop in `run_garch_simulation`, never vectorised. The pragmatic v2 fix was reducing simulation count 10,000 → 1,000 (real pipeline time now ~17–26s, demo-viable); a proper numpy-vectorised rewrite is deliberately deferred to v4, since v2's scope was infra only, not modeling changes.
 - **iOS Safari enforces HTTPS more strictly than desktop browsers.** The S3 website endpoint (plain HTTP) loaded fine on desktop Chrome and Safari but failed on iPhone Safari specifically. This is what made CloudFront's HTTPS a genuine functional requirement for the stated goal of a working iPhone demo, not just a nice-to-have.
 
 ## Deployment history
@@ -140,7 +140,9 @@ The original deployment — two ECS Fargate services (API, UI), Docker images on
 
 ## Roadmap
 
-- **v3** (next, after Document Intelligence project) — sector-wide symbol universe, buy/sell-new-ticker suggestions (not just reweighting held positions), a Differential Evolution solver for the larger search space, live market data, compliance rules extended to proposed tickers, and the deferred GARCH vectorisation fix noted above. Deliberately sequenced after infra (v2) so modeling risk and infra risk stay isolated from each other.
+Full version-by-version history — what shipped in v1, v2, v3, and what's planned for v4 — is in [`CHANGELOG.md`](CHANGELOG.md).
+
+- **v4** (next, after Document Intelligence project) — sector-wide symbol universe, buy/sell-new-ticker suggestions (not just reweighting held positions), a Differential Evolution solver for the larger search space, live market data, compliance rules extended to proposed tickers, and the deferred GARCH vectorisation fix noted above. Deliberately sequenced after infra (v2) and guardrails/accuracy hardening (v3) so infra risk, guardrail risk, and modeling risk stay isolated from each other.
 
 ---
 

@@ -132,7 +132,7 @@ elsewhere in the app.
 - **Independent testability** — each server has its own test suite and its own `requirements.txt`, deliberately self-contained (no shared base dependency file)
 - **Independent domain separation** — a bug in the Scenario Simulation server's Monte Carlo logic is scoped to one module, not spread across the codebase; this held even after the v2 move to in-process calls, since the separation is organisational, not just process-level
 - **Genuine multi-agent demonstration** — this is the actual differentiator: it would be materially simpler to write this as one Python module with five functions. Building it as five real MCP servers demonstrates the protocol and the orchestration pattern, not just the financial logic
-- **Swap-ready for v3** — when the Compliance server needs to evaluate proposed (not just held) tickers, or the Market Data server needs to move from CSV fixtures to live data, each change is contained to one server's codebase
+- **Swap-ready for v4** — when the Compliance server needs to evaluate proposed (not just held) tickers, or the Market Data server needs to move from CSV fixtures to live data, each change is contained to one server's codebase
 
 ---
 
@@ -149,7 +149,7 @@ elsewhere in the app.
 
 1. **Docker's attestation manifest breaks Lambda deploys** — buildx's default output includes an attestation/SBOM manifest that Lambda's container image support rejects (`InvalidParameterValueException: image manifest ... is not supported`). Fixed by building with `--provenance=false --sbom=false`.
 2. **`logging.basicConfig()` is a silent no-op on Lambda** — the runtime pre-configures the root logger before application code runs. Every `logger.info()` in the orchestrator was invisible in CloudWatch until `force=True` was added — this was the precondition for diagnosing the next issue.
-3. **The GARCH scenario simulation node, not Lambda resource limits, was the real performance bottleneck** — ~30s/call, ~60s for a full pipeline run. Doubling Lambda memory (and its proportional vCPU increase) made no difference, ruling out compute availability and confirming a single-threaded, unvectorised 10,000-simulation × 252-day for-loop as the cause. Pragmatic fix: reduced simulation count to 1,000 (pipeline now ~17–26s). A proper numpy-vectorised rewrite is deliberately deferred to v3 — this was infra-hardening scope, not modeling scope.
+3. **The GARCH scenario simulation node, not Lambda resource limits, was the real performance bottleneck** — ~30s/call, ~60s for a full pipeline run. Doubling Lambda memory (and its proportional vCPU increase) made no difference, ruling out compute availability and confirming a single-threaded, unvectorised 10,000-simulation × 252-day for-loop as the cause. Pragmatic fix: reduced simulation count to 1,000 (pipeline now ~17–26s). A proper numpy-vectorised rewrite is deliberately deferred to v4 — this was infra-hardening scope, not modeling scope.
 4. **iOS Safari enforces HTTPS more strictly than desktop browsers** — the plain-HTTP S3 website endpoint worked on desktop Chrome/Safari but failed on iPhone Safari. This made CloudFront's free HTTPS a genuine functional requirement for the working-iPhone-demo goal, not a nice-to-have.
 
 **Cost:** targeting ~$0.31–0.35/month at typical demo-driven usage (versus v1's $0.75–4/month depending on hours run) — a real-usage check-in is still pending.
@@ -225,7 +225,7 @@ graph TB
 | Agent protocol | Model Context Protocol (MCP) — in-process calls (v2), stdio transport (v1) |
 | LLM | OpenAI GPT-4o |
 | Risk modelling | `arch` (GARCH), `scipy`, `numpy`, `pandas` |
-| Optimisation | `scipy` (SLSQP solver; v3 moves to Differential Evolution) |
-| Market data | `yfinance` (CSV fixtures in v1/v2; live in v3) |
+| Optimisation | `scipy` (SLSQP solver; v4 moves to Differential Evolution) |
+| Market data | `yfinance` (CSV fixtures in v1/v2; live in v4) |
 | v2 deployment (current) | AWS Lambda (ARM64/Graviton2), API Gateway, S3, CloudFront |
 | v1 deployment (previous) | AWS ECS Fargate, ECR, Secrets Manager, CloudWatch |
